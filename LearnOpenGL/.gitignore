@@ -1,0 +1,52 @@
+# =========================
+# TinyGameEngineLab - Git Ignore
+# =========================
+
+# ===== 第三方依赖源码（不上传）=====
+# CMake 源码包（文件非常多）
+Depends/cmake-4.3.3/
+
+# GLFW 源码包（建议用户本地安装或单独管理）
+Depends/glfw-3.4/
+
+# ===== 构建目录 =====
+build/
+out/
+cmake-build-*/
+
+# ===== CMake / Make 生成文件 =====
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# ===== Visual Studio / IDE =====
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ===== 编译产物 =====
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+
+# ===== 运行日志 / 临时文件 =====
+*.log
+*.tmp
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
