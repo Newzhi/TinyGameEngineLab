@@ -25,3 +25,7 @@
 - Windows 上链接 `opengl32`；非 Windows 平台使用 `find_package(OpenGL)`。
 - 如果是离线环境，可改回本地第三方目录方式（手动提供 GLFW 源码/库）。
 
+## 学习文档
+
+- 常用 API + 开窗/渲染流程说明：`Proj/docs/常用API与窗口渲染流程.md`
+
