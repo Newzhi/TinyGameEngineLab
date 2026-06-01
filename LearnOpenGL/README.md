@@ -1,48 +1,27 @@
-# TinyGameEngineLab - 环境准备与依赖下载说明
+# TinyGameEngineLab - 构建说明（可直接克隆使用）
 
-本项目建议只提交**项目源码**与 `Depends/glad/`，不要提交 `Depends/cmake-4.3.3/` 和 `Depends/glfw-3.4/` 这类第三方完整源码包。
+项目已改为 **CMake FetchContent 自动下载 GLFW**。因此仓库中不需要提交 `Depends/glfw-3.4/`，克隆后只要具备基础工具即可构建。
 
-## 你需要安装/下载的内容
+## 需要准备的环境
 
-- **Git（必需）**：用于拉取与提交代码  
-  下载地址：[Git 官网](https://git-scm.com/downloads)
+- **Git**：用于克隆代码（`git clone`）
+- **CMake**：建议 3.17+
+- **C/C++ 编译器**：Windows 下可用 MSVC 或 MinGW
+- **网络连接**：首次配置时 CMake 会自动拉取 GLFW 源码
 
-- **CMake（必需）**：用于生成工程文件（建议安装版，不建议把 CMake 源码放进仓库）  
-  下载地址：[CMake 官网](https://cmake.org/download/)
+## 已内置依赖
 
-- **GLFW（必需，二选一）**：窗口和输入库  
-  - 方案 A（推荐）：本地安装或通过包管理器安装 GLFW  
-    官网地址：[GLFW 官网](https://www.glfw.org/download)
-  - 方案 B：自行下载 GLFW 源码并在本地编译（不建议直接提交整个源码到仓库）
+- `Depends/glad/`：已包含 `glad.c` 和相关头文件
 
-- **OpenGL 驱动（必需）**：由显卡驱动提供  
-  请安装最新显卡驱动：
-  - NVIDIA: [NVIDIA Driver Downloads](https://www.nvidia.com/Download/index.aspx)
-  - AMD: [AMD Drivers and Support](https://www.amd.com/en/support)
-  - Intel: [Intel Driver & Support Assistant](https://www.intel.com/content/www/us/en/support/detect.html)
+## 克隆后构建步骤（CLion）
 
-- **编译器（必需，至少一种）**
-  - Windows 推荐：Visual Studio 2022（C++ Desktop Development）  
-    下载地址：[Visual Studio](https://visualstudio.microsoft.com/)
-  - 或 MinGW-w64（如你使用 GCC 工具链）
+1. 用 CLion 打开项目中的 `Proj` 目录。
+2. 确认 `Toolchains` 里 CMake 与编译器可用。
+3. 点击 **Reload CMake Project**。
+4. 首次会自动下载并构建 GLFW，随后可直接运行目标 `main`。
 
-## 仓库内已包含内容
+## 备注
 
-- `Depends/glad/`：已包含 OpenGL 加载器代码（通常不需要你再单独生成）。
+- Windows 上链接 `opengl32`；非 Windows 平台使用 `find_package(OpenGL)`。
+- 如果是离线环境，可改回本地第三方目录方式（手动提供 GLFW 源码/库）。
 
-## 不建议上传到 Git 的内容
-
-- `Depends/cmake-4.3.3/`（CMake 源码，文件量巨大）
-- `Depends/glfw-3.4/`（GLFW 完整源码）
-- `build/`、`out/`、`cmake-build-*` 等构建输出目录
-
-## Windows 快速检查命令（可选）
-
-在 PowerShell 中执行：
-
-```powershell
-git --version
-cmake --version
-```
-
-若命令可用，说明基础环境已就绪。
