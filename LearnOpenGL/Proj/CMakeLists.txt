@@ -21,11 +21,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
-add_executable(main src/glad.c src/main.cpp)
+add_executable(main
+    src/glad.c
+        src/cppfile/main.cpp
+        src/headfile/Shader.h
+)
 
 # glad 与 KHR 头文件
 # 目录结构：includes/glad/glad.h, includes/KHR/khrplatform.h
-target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
+target_include_directories(main PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/includes
+)
+
+# 把着色器文件复制到构建目录，便于运行时按相对路径读取
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/shaders DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 if (WIN32)
     target_link_libraries(main PRIVATE glfw opengl32)
