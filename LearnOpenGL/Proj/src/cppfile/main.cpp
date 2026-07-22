@@ -22,6 +22,10 @@ void processInput(GLFWwindow *window);
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
+// 窗口尺寸（resize 时更新，用于计算 projection 的 aspect 比例）
+unsigned int g_ScreenWidth = SCR_WIDTH;
+unsigned int g_ScreenHeight = SCR_HEIGHT;
+
 int main()
 {
     // =========================
@@ -52,43 +56,75 @@ int main()
         return -1;
     }
 
+    // 开启深度测试：绘制 3D 立方体时，近处表面应遮挡远处表面
+    glEnable(GL_DEPTH_TEST);
+
     // =========================
     // 第二阶段：编译链接着色器
     // =========================
     Shader ourShader("shaders/3.3.shader.vs", "shaders/3.3.shader.fs");
 
     // =========================
-    // 第三阶段：准备顶点数据 + 纹理，上传到 GPU
+    // 第三阶段：准备立方体顶点数据 + 纹理，上传到 GPU
     // =========================
 
+    // 立方体 6 个面 × 2 个三角形 × 3 个顶点 = 36 个顶点
     // 每个顶点 8 个 float = 位置(3) + 颜色(3) + UV(2)
+    // 立方体中心在原点，边长 1.0（范围 [-0.5, 0.5]），这是**局部空间**坐标
     float vertices[] = {
-        // ---- 位置 ----       ---- 颜色 ----     -- 纹理坐标 --
-         0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,   // 右上
-         0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,   // 右下
-        -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,   // 左下
-        -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f    // 左上
+        // ---- 位置 ----          ---- 颜色 ----        -- 纹理坐标 --
+        // 后面 (z = -0.5)
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 0.0f,   0.0f, 0.0f,
+        // 前面 (z = +0.5)
+        -0.5f, -0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   0.0f, 0.0f,
+        // 左面 (x = -0.5)
+        -0.5f,  0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+        // 右面 (x = +0.5)
+         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,   1.0f, 1.0f, 0.0f,   1.0f, 0.0f,
+        // 底面 (y = -0.5)
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 1.0f,   0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 1.0f,   1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 1.0f,   1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,   1.0f, 0.0f, 1.0f,   0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,   1.0f, 0.0f, 1.0f,   0.0f, 1.0f,
+        // 顶面 (y = +0.5)
+        -0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 1.0f,   0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 1.0f,   1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 1.0f,   1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 1.0f,   1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,   0.0f, 1.0f, 1.0f,   0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,   0.0f, 1.0f, 1.0f,   0.0f, 1.0f
     };
 
-    unsigned int indices[] = {
-        0, 1, 3,
-        1, 2, 3
-    };
-
-
-
-    unsigned int VBO, VAO, EBO;
+    unsigned int VBO, VAO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
-    glGenBuffers(1, &EBO);
 
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     // 位置 attribute 0
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
@@ -132,32 +168,63 @@ int main()
     stbi_image_free(data);
 
     // =========================
+    // 坐标系矩阵（View / Projection 在循环外定义一次即可）
+    // =========================
+
+    // View 矩阵：定义「相机在哪、看向哪、上方向是哪」
+    // 相机在 z=3 处看向原点，这样立方体（中心在原点）完整出现在视野中
+    glm::mat4 view = glm::lookAt(
+        glm::vec3(0.0f, 0.0f, 3.0f),   // 相机位置（世界空间）
+        glm::vec3(0.0f, 0.0f, 0.0f),   // 观察目标点
+        glm::vec3(0.0f, 1.0f, 0.0f)    // 世界上方向
+    );
+
+    // Projection 矩阵：透视投影，把 3D 场景压成 2D 画面（近大远小）
+    // aspect = 宽/高，窗口 resize 时需更新
+    float aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
+    glm::mat4 projection = glm::perspective(
+        glm::radians(45.0f),   // 垂直视野角度 FOV
+        aspect,                // 宽高比
+        0.1f,                  // 近裁剪面
+        100.0f                 // 远裁剪面
+    );
+
+    // =========================
     // 第四阶段：渲染循环
     // =========================
     while (!glfwWindowShouldClose(window))
     {
-        //矩阵变化
-        glm::mat4 trans = glm::mat4(1.0f);
-        trans = glm::translate(trans, glm::vec3(0.5f, 0.5f, 0.0f));
-        trans = glm::rotate(trans, (float)glfwGetTime(), glm::vec3(0.0, 0.0, 1.0));
-        trans = glm::scale(trans, glm::vec3(0.5, 0.5, 0.5));
         processInput(window);
 
+        // --- Model 矩阵：每帧更新，实现随时间旋转 ---
+        // 必须从单位矩阵开始，否则 glm::rotate 会在未初始化的矩阵上运算
+        glm::mat4 model = glm::mat4(1.0f);
+        // 先绕 X 轴倾斜 -55°，让立方体以更好角度展示（类似 LearnOpenGL 教程）
+        model = glm::rotate(model, glm::radians(-55.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        // 再随时间绕 (0.5, 1.0, 0.0) 斜轴旋转，形成动态效果
+        model = glm::rotate(model, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+
+        // 窗口 resize 后，重新计算 aspect 和 projection
+        aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
+        projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         ourShader.use();
 
-        //矩阵变化
-        unsigned int transformLoc = glGetUniformLocation(ourShader.ID, "transform");
-        glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(trans));
+        // 把 MVP 三个矩阵传给顶点着色器
+        ourShader.setMat4("model", model);
+        ourShader.setMat4("view", view);
+        ourShader.setMat4("projection", projection);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture);
         ourShader.setInt("ourTexture", 0);
 
         glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        // 36 个顶点 = 12 个三角形 = 立方体 6 个面
+        glDrawArrays(GL_TRIANGLES, 0, 36);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -168,7 +235,6 @@ int main()
     // =========================
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
     glDeleteTextures(1, &texture);
     glfwTerminate();
     return 0;
@@ -183,5 +249,7 @@ void processInput(GLFWwindow *window)
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     (void)window;
+    g_ScreenWidth = static_cast<unsigned int>(width);
+    g_ScreenHeight = static_cast<unsigned int>(height);
     glViewport(0, 0, width, height);
 }

@@ -310,26 +310,22 @@ ourShader.setFloat("mixValue", 0.5f);
 
 ---
 
-## 13. 下一步（Day 06 预告）
+## 13. 下一步（Day 06，已实现）
 
-当前只有一个 `transform`（类似 Model 矩阵），顶点仍在 NDC 附近。接下来可以：
+Day 06 文档与代码已完成 MVP 立方体，详见：
 
-1. 拆成 **model / view / projection** 三个 uniform
-2. 在 `Shader.h` 添加 `setMat4`
-3. 窗口 resize 时更新 `projection` 的 aspect ratio
-4. 按键 WASD 改变平移量，实现手动移动
+| 文档 | 内容 |
+|------|------|
+| `docs/Part1/Day06/坐标系统与空间变换链.md` | 五种坐标空间、MVP 链、视锥体 |
+| `docs/Part1/Day06/投影矩阵数学原理.md` | 正交/透视投影矩阵推导 |
+| `docs/Part1/Day06/MVP立方体与代码实践.md` | **当前 main.cpp 改动说明** |
 
-完整 MVP 写法：
+当前项目已从单个 `transform` 升级为完整 MVP + 3D 立方体。可继续尝试：
 
-```glsl
-gl_Position = projection * view * model * vec4(aPos, 1.0);
-```
-
-```cpp
-ourShader.setMat4("model", model);
-ourShader.setMat4("view", view);
-ourShader.setMat4("projection", projection);
-```
+1. 阅读 **`docs/Part1/Day07/摄像机系统概述与原理.md`** — 相机与 View 矩阵原理
+2. 按键 WASD 移动相机（每帧更新 `view`）
+3. 绘制多个立方体（同一 VAO，不同 `model`）
+4. 正交投影对比（`glm::ortho` vs `glm::perspective`）
 
 ---
 
@@ -337,13 +333,11 @@ ourShader.setMat4("projection", projection);
 
 ```
 Proj/
-  src/cppfile/main.cpp          ← GLM 算 trans，glUniformMatrix4fv 上传
-  src/headfile/Shader.h         ← setInt 等（可扩展 setMat4）
-  shaders/3.3.shader.vs         ← uniform mat4 transform
+  src/cppfile/main.cpp          ← Day05: transform；Day06: MVP 立方体
+  src/headfile/Shader.h         ← setMat4（Day06 新增）
+  shaders/3.3.shader.vs         ← Day06: model/view/projection
   shaders/3.3.shader.fs         ← uniform sampler2D ourTexture
   includes/glm/                 ← GLM 1.0.3
-  docs/Day05/
-    线性代数基础与变换.md
-    GLM常用API与类型说明.md
-    变换矩阵与Uniform传递.md    ← 本文档
+  docs/Part1/Day05/                   ← 本文档所在目录
+  docs/Part1/Day06/MVP立方体与代码实践.md  ← Day06 代码说明
 ```
