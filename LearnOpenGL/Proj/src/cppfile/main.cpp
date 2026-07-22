@@ -17,6 +17,8 @@
 #include "stb_image.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow *window);
 
 const unsigned int SCR_WIDTH = 800;
@@ -25,6 +27,29 @@ const unsigned int SCR_HEIGHT = 600;
 // 窗口尺寸（resize 时更新，用于计算 projection 的 aspect 比例）
 unsigned int g_ScreenWidth = SCR_WIDTH;
 unsigned int g_ScreenHeight = SCR_HEIGHT;
+
+// =========================
+// 摄像机状态（全局，供回调函数读写）
+// =========================
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 3.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f,  0.0f);
+
+// 欧拉角：yaw 水平转角，pitch 垂直转角（初始朝向 -Z，yaw = -90°）
+float yaw   = -90.0f;
+float pitch = 0.0f;
+
+// 鼠标上一帧位置 & 首次进入窗口标记（避免光标跳变）
+bool  firstMouse = true;
+float lastX = SCR_WIDTH / 2.0f;
+float lastY = SCR_HEIGHT / 2.0f;
+
+// 滚轮控制的视野角度 FOV
+float fov = 45.0f;
+
+// 帧间隔，保证 WASD 移动速度不随 FPS 变化
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
 
 int main()
 {
@@ -49,6 +74,13 @@ int main()
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // 注册鼠标与滚轮回调（必须在 glfwMakeContextCurrent 之后）
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+
+    // 捕获鼠标光标，隐藏并锁定在窗口内（FPS 模式）
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
@@ -168,52 +200,32 @@ int main()
     stbi_image_free(data);
 
     // =========================
-    // 坐标系矩阵（View / Projection 在循环外定义一次即可）
-    // =========================
-
-    // View 矩阵：定义「相机在哪、看向哪、上方向是哪」
-    // 相机在 z=3 处看向原点，这样立方体（中心在原点）完整出现在视野中
-    glm::mat4 view = glm::lookAt(
-        glm::vec3(0.0f, 0.0f, 3.0f),   // 相机位置（世界空间）
-        glm::vec3(0.0f, 0.0f, 0.0f),   // 观察目标点
-        glm::vec3(0.0f, 1.0f, 0.0f)    // 世界上方向
-    );
-
-    // Projection 矩阵：透视投影，把 3D 场景压成 2D 画面（近大远小）
-    // aspect = 宽/高，窗口 resize 时需更新
-    float aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
-    glm::mat4 projection = glm::perspective(
-        glm::radians(45.0f),   // 垂直视野角度 FOV
-        aspect,                // 宽高比
-        0.1f,                  // 近裁剪面
-        100.0f                 // 远裁剪面
-    );
-
-    // =========================
     // 第四阶段：渲染循环
     // =========================
     while (!glfwWindowShouldClose(window))
     {
+        // 计算 deltaTime（每帧耗时，秒）
+        float currentFrame = static_cast<float>(glfwGetTime());
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
         processInput(window);
 
-        // --- Model 矩阵：每帧更新，实现随时间旋转 ---
-        // 必须从单位矩阵开始，否则 glm::rotate 会在未初始化的矩阵上运算
+        // Model 矩阵：立方体静止不动（便于观察相机操作效果）
         glm::mat4 model = glm::mat4(1.0f);
-        // 先绕 X 轴倾斜 -55°，让立方体以更好角度展示（类似 LearnOpenGL 教程）
-        model = glm::rotate(model, glm::radians(-55.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        // 再随时间绕 (0.5, 1.0, 0.0) 斜轴旋转，形成动态效果
-        model = glm::rotate(model, (float)glfwGetTime() * glm::radians(50.0f), glm::vec3(0.5f, 1.0f, 0.0f));
 
-        // 窗口 resize 后，重新计算 aspect 和 projection
-        aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
-        projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        // View 矩阵：由 cameraPos + cameraFront 决定（鼠标回调会更新 cameraFront）
+        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+
+        // Projection 矩阵：fov 由滚轮回调更新
+        float aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
+        glm::mat4 projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 100.0f);
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         ourShader.use();
 
-        // 把 MVP 三个矩阵传给顶点着色器
         ourShader.setMat4("model", model);
         ourShader.setMat4("view", view);
         ourShader.setMat4("projection", projection);
@@ -223,7 +235,6 @@ int main()
         ourShader.setInt("ourTexture", 0);
 
         glBindVertexArray(VAO);
-        // 36 个顶点 = 12 个三角形 = 立方体 6 个面
         glDrawArrays(GL_TRIANGLES, 0, 36);
 
         glfwSwapBuffers(window);
@@ -240,10 +251,80 @@ int main()
     return 0;
 }
 
+// =========================
+// 输入处理：键盘 WASD 移动相机
+// =========================
 void processInput(GLFWwindow *window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+
+    float cameraSpeed = 2.5f * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+}
+
+// =========================
+// 鼠标移动回调：更新 yaw/pitch，重算 cameraFront
+// GLFW 在鼠标移动时自动调用此函数
+// =========================
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    (void)window;
+
+    // 第一帧：只记录位置，不计算偏移（避免光标从屏幕外跳进来导致视角猛转）
+    if (firstMouse)
+    {
+        lastX = static_cast<float>(xpos);
+        lastY = static_cast<float>(ypos);
+        firstMouse = false;
+    }
+
+    float xoffset = static_cast<float>(xpos) - lastX;
+    float yoffset = lastY - static_cast<float>(ypos); // 鼠标向上移时 y 减小，所以用 lastY - ypos
+    lastX = static_cast<float>(xpos);
+    lastY = static_cast<float>(ypos);
+
+    float sensitivity = 0.05f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    yaw   += xoffset;
+    pitch += yoffset;
+
+    // 限制 pitch，防止万向锁（头翻到正上/正下时方向不稳定）
+    if (pitch > 89.0f)
+        pitch = 89.0f;
+    if (pitch < -89.0f)
+        pitch = -89.0f;
+
+    // 由 yaw/pitch 更新前向向量
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+// =========================
+// 滚轮回调：缩放视野 FOV（改变 projection，不改变相机位置）
+// =========================
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    (void)window;
+    (void)xoffset;
+
+    fov -= static_cast<float>(yoffset);
+    if (fov < 1.0f)
+        fov = 1.0f;
+    if (fov > 45.0f)
+        fov = 45.0f;
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
