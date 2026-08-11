@@ -24,6 +24,7 @@ FetchContent_MakeAvailable(glfw)
 add_executable(main
     src/glad.c
     src/cppfile/main.cpp
+    src/cppfile/stb_image_impl.cpp
     src/headfile/Shader.h
     src/headfile/Camera.h
 )

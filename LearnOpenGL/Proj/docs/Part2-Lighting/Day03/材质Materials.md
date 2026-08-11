@@ -7,7 +7,7 @@
 | [Day01 颜色与场景](../Day01/颜色与光照场景搭建.md) | RGB 相乘、双立方体实验场 |
 | [Day02 基础光照与法线](../Day02/基础光照与法线.md) | Ambient / Diffuse / Specular、法线、Phong 公式 |
 | **本文档** | Material、光照三分量拆分、struct uniform、OpenGL/VRML 材质表 |
-| 后续 | 光照贴图（用贴图代替材质颜色） |
+| [Day04 光照贴图](../Day04/光照贴图LightingMaps.md) | Diffuse / Specular / Emission Map |
 
 > **公式说明**：公式用代码块书写，便于 Markdown 预览。
 
@@ -425,7 +425,7 @@ vec3 diffuseColor  = texture(material.diffuse, TexCoords).rgb;
 vec3 specularColor = texture(material.specular, TexCoords).rgb;
 ```
 
-同一套 Phong 公式就能让箱子各处颜色不同、高光强度随贴图变化——这就是 **Lighting maps**。Day03 先把「参数化材质」搞清，Day04 再贴图。
+同一套 Phong 公式就能让箱子各处颜色不同、高光强度随贴图变化——详见 **[Day04 光照贴图](../Day04/光照贴图LightingMaps.md)**。
 
 ---
 
@@ -465,7 +465,9 @@ Day02 基础光照与法线（Phong 三项 + 法线）
   ↓
 Day03 材质（本文）← Material / Light 拆分
   ↓
-光照贴图 / 投光物 / 多光源
+Day04 光照贴图 ← Diffuse / Specular Map
+  ↓
+投光物 / 多光源
 ```
 
 ---
