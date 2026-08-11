@@ -25,6 +25,7 @@ add_executable(main
     src/glad.c
     src/cppfile/main.cpp
     src/headfile/Shader.h
+    src/headfile/Camera.h
 )
 
 # 头文件搜索路径：

@@ -27,6 +27,7 @@
 
 ## 学习文档
 
-- 总览与核心流程：`Proj/docs/OpenGL核心理解_数据与执行流程.md`
-- Part 1 入门笔记（Day 01 ~ 07）：`Proj/docs/Part1/README.md`
+- 总览与核心流程：`Proj/docs/Part1-Base/OpenGL核心理解_数据与执行流程.md`
+- Part 1 入门笔记（Day 01 ~ 07）：`Proj/docs/Part1-Base/README.md`
+- Part 2 光照笔记：`Proj/docs/Part2-Lighting/README.md`
 
