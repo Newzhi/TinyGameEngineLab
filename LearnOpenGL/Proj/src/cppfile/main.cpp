@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <cmath>
+#include <string>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,12 +31,78 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 场景颜色：珊瑚色物体 + 偏暖白光，便于观察明暗
-glm::vec3 objectColor(1.0f, 0.5f, 0.31f);
 glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
-
-// 光源初始位置（渲染循环中会绕物体旋转，方便演示漫反射）
 glm::vec3 lightPos(1.2f, 1.0f, 2.0f);
+
+// ---------- 材质预设（Phong 参数，近似塑料 / 金属 / 橡胶）----------
+struct MaterialPreset {
+    const char* name;
+    glm::vec3 ambient;
+    glm::vec3 diffuse;
+    glm::vec3 specular;
+    float shininess;
+};
+
+const MaterialPreset g_materials[] = {
+    // 1：青色塑料 —— 漫反射偏青，高光偏白，shininess 中等
+    {
+        "Cyan Plastic",
+        glm::vec3(0.0f, 0.15f, 0.15f),
+        glm::vec3(0.0f, 0.55f, 0.55f),
+        glm::vec3(0.7f, 0.7f, 0.7f),
+        64.0f
+    },
+    // 2：金色金属感 —— 漫反射/高光都偏金，shininess 很大（尖高光）
+    {
+        "Gold Metal",
+        glm::vec3(0.24725f, 0.1995f, 0.0745f),
+        glm::vec3(0.75164f, 0.60648f, 0.22648f),
+        glm::vec3(0.628281f, 0.555802f, 0.366065f),
+        128.0f
+    },
+    // 3：铜色金属感
+    {
+        "Copper Metal",
+        glm::vec3(0.19125f, 0.0735f, 0.0225f),
+        glm::vec3(0.7038f, 0.27048f, 0.0828f),
+        glm::vec3(0.256777f, 0.137622f, 0.086014f),
+        32.0f
+    },
+    // 4：黑色橡胶 —— 高光很弱、很糊，哑光
+    {
+        "Black Rubber",
+        glm::vec3(0.02f, 0.02f, 0.02f),
+        glm::vec3(0.05f, 0.05f, 0.05f),
+        glm::vec3(0.1f, 0.1f, 0.1f),
+        8.0f
+    }
+};
+
+const int g_materialCount = sizeof(g_materials) / sizeof(g_materials[0]);
+int g_materialIndex = 0;
+
+// 按键边沿检测，避免按住时连切
+bool g_key1WasDown = false;
+bool g_key2WasDown = false;
+bool g_key3WasDown = false;
+bool g_key4WasDown = false;
+
+void setMaterial(const Shader& shader, const MaterialPreset& mat)
+{
+    shader.setVec3("material.ambient", mat.ambient.x, mat.ambient.y, mat.ambient.z);
+    shader.setVec3("material.diffuse", mat.diffuse.x, mat.diffuse.y, mat.diffuse.z);
+    shader.setVec3("material.specular", mat.specular.x, mat.specular.y, mat.specular.z);
+    shader.setFloat("material.shininess", mat.shininess);
+}
+
+void setLight(const Shader& shader, const glm::vec3& pos, const glm::vec3& color)
+{
+    shader.setVec3("light.position", pos.x, pos.y, pos.z);
+    // 灯光三分量：环境弱、漫反射中、镜面亮
+    shader.setVec3("light.ambient", color.x * 0.2f, color.y * 0.2f, color.z * 0.2f);
+    shader.setVec3("light.diffuse", color.x * 0.5f, color.y * 0.5f, color.z * 0.5f);
+    shader.setVec3("light.specular", color.x, color.y, color.z);
+}
 
 int main()
 {
@@ -48,7 +115,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Phong Lighting", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Materials", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -72,13 +139,17 @@ int main()
     Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    // 物体：Ambient + Diffuse + Specular；灯：显示 lightColor
     Shader lightingShader("shaders/lightTest.vs", "shaders/lightTest.fs");
     Shader lampShader("shaders/lamp.vs", "shaders/lamp.fs");
 
-    // 每个顶点 6 float = 位置(3) + 法线(3)；法线按面给出，同一角点在不同面法线不同
+    std::cout << "Materials Demo — press 1~4 to switch:\n"
+              << "  1 Cyan Plastic\n"
+              << "  2 Gold Metal\n"
+              << "  3 Copper Metal\n"
+              << "  4 Black Rubber\n"
+              << "Current: " << g_materials[g_materialIndex].name << std::endl;
+
     float vertices[] = {
-        // 后面  z = -0.5，法线 (0, 0, -1)
         -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
          0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
          0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
@@ -86,7 +157,6 @@ int main()
         -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
         -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
 
-        // 前面  z = +0.5，法线 (0, 0, 1)
         -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
          0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
          0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
@@ -94,7 +164,6 @@ int main()
         -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
         -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
 
-        // 左面  x = -0.5，法线 (-1, 0, 0)
         -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
         -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
         -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
@@ -102,7 +171,6 @@ int main()
         -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
         -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
 
-        // 右面  x = +0.5，法线 (1, 0, 0)
          0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
          0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
          0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
@@ -110,7 +178,6 @@ int main()
          0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
          0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
 
-        // 底面  y = -0.5，法线 (0, -1, 0)
         -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
          0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
          0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
@@ -118,7 +185,6 @@ int main()
         -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
         -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
 
-        // 顶面  y = +0.5，法线 (0, 1, 0)
         -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
          0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
          0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
@@ -135,14 +201,11 @@ int main()
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
     glBindVertexArray(cubeVAO);
-    // location 0：位置
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    // location 1：法线
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // 灯 VAO：同一 VBO，只读位置（stride 仍是 6 float，跳过法线）
     unsigned int lightVAO;
     glGenVertexArrays(1, &lightVAO);
     glBindVertexArray(lightVAO);
@@ -158,7 +221,6 @@ int main()
 
         processInput(window);
 
-        // 灯绕物体旋转，方便肉眼看到各面明暗随光方向变化
         lightPos.x = 1.2f * std::cos(currentFrame);
         lightPos.z = 1.2f * std::sin(currentFrame);
         lightPos.y = 1.0f;
@@ -170,12 +232,10 @@ int main()
         float aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), aspect, 0.1f, 100.0f);
 
-        // ---------- 被照物体：Ambient + Diffuse + Specular ----------
+        // ---------- 被照物体：按当前材质预设绘制 ----------
         lightingShader.use();
-        lightingShader.setVec3("objectColor", objectColor.x, objectColor.y, objectColor.z);
-        lightingShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
-        lightingShader.setVec3("lightPos", lightPos.x, lightPos.y, lightPos.z);
-        // 高光需要视线方向：传入相机世界坐标
+        setMaterial(lightingShader, g_materials[g_materialIndex]);
+        setLight(lightingShader, lightPos, lightColor);
         lightingShader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
         lightingShader.setMat4("view", view);
         lightingShader.setMat4("projection", projection);
@@ -186,7 +246,7 @@ int main()
         glBindVertexArray(cubeVAO);
         glDrawArrays(GL_TRIANGLES, 0, 36);
 
-        // ---------- 灯立方体：标出当前光源位置与颜色 ----------
+        // ---------- 灯立方体 ----------
         lampShader.use();
         lampShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
         lampShader.setMat4("view", view);
@@ -228,6 +288,22 @@ void processInput(GLFWwindow *window)
         g_camera->ProcessKeyboard(LEFT, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         g_camera->ProcessKeyboard(RIGHT, deltaTime);
+
+    // 1~4 切换材质（按下边沿触发一次）
+    auto trySwitch = [](GLFWwindow* win, int key, bool& wasDown, int index) {
+        bool down = glfwGetKey(win, key) == GLFW_PRESS;
+        if (down && !wasDown && index < g_materialCount)
+        {
+            g_materialIndex = index;
+            std::cout << "Material -> " << g_materials[g_materialIndex].name << std::endl;
+        }
+        wasDown = down;
+    };
+
+    trySwitch(window, GLFW_KEY_1, g_key1WasDown, 0);
+    trySwitch(window, GLFW_KEY_2, g_key2WasDown, 1);
+    trySwitch(window, GLFW_KEY_3, g_key3WasDown, 2);
+    trySwitch(window, GLFW_KEY_4, g_key4WasDown, 3);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
