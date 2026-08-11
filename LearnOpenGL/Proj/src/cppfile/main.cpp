@@ -8,6 +8,7 @@
 #include "../headfile/Camera.h"
 
 #include <iostream>
+#include <cmath>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -29,11 +30,11 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 场景颜色参数：修改这里即可同时观察灯颜色和物体反射颜色的变化
-glm::vec3 objectColor(1.0f, 0.5f, 0.31f); // 珊瑚色物体
-glm::vec3 lightColor(0.2f, 0.8f, 1.0f);   // 蓝绿色光源
+// 场景颜色：珊瑚色物体 + 偏暖白光，便于观察明暗
+glm::vec3 objectColor(1.0f, 0.5f, 0.31f);
+glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
 
-// 光源在世界空间中的位置（灯立方体画在这里）
+// 光源初始位置（渲染循环中会绕物体旋转，方便演示漫反射）
 glm::vec3 lightPos(1.2f, 1.0f, 2.0f);
 
 int main()
@@ -47,7 +48,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Colors", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Phong Lighting", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -71,53 +72,59 @@ int main()
     Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    // 物体：objectColor * lightColor；灯：恒定白色
+    // 物体：Ambient + Diffuse + Specular；灯：显示 lightColor
     Shader lightingShader("shaders/lightTest.vs", "shaders/lightTest.fs");
     Shader lampShader("shaders/lamp.vs", "shaders/lamp.fs");
 
-    // 仅位置的立方体顶点（本节不需要颜色/纹理属性）
+    // 每个顶点 6 float = 位置(3) + 法线(3)；法线按面给出，同一角点在不同面法线不同
     float vertices[] = {
-        -0.5f, -0.5f, -0.5f,
-         0.5f, -0.5f, -0.5f,
-         0.5f,  0.5f, -0.5f,
-         0.5f,  0.5f, -0.5f,
-        -0.5f,  0.5f, -0.5f,
-        -0.5f, -0.5f, -0.5f,
+        // 后面  z = -0.5，法线 (0, 0, -1)
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
 
-        -0.5f, -0.5f,  0.5f,
-         0.5f, -0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,
-        -0.5f,  0.5f,  0.5f,
-        -0.5f, -0.5f,  0.5f,
+        // 前面  z = +0.5，法线 (0, 0, 1)
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
 
-        -0.5f,  0.5f,  0.5f,
-        -0.5f,  0.5f, -0.5f,
-        -0.5f, -0.5f, -0.5f,
-        -0.5f, -0.5f, -0.5f,
-        -0.5f, -0.5f,  0.5f,
-        -0.5f,  0.5f,  0.5f,
+        // 左面  x = -0.5，法线 (-1, 0, 0)
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
 
-         0.5f,  0.5f,  0.5f,
-         0.5f,  0.5f, -0.5f,
-         0.5f, -0.5f, -0.5f,
-         0.5f, -0.5f, -0.5f,
-         0.5f, -0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,
+        // 右面  x = +0.5，法线 (1, 0, 0)
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
 
-        -0.5f, -0.5f, -0.5f,
-         0.5f, -0.5f, -0.5f,
-         0.5f, -0.5f,  0.5f,
-         0.5f, -0.5f,  0.5f,
-        -0.5f, -0.5f,  0.5f,
-        -0.5f, -0.5f, -0.5f,
+        // 底面  y = -0.5，法线 (0, -1, 0)
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
 
-        -0.5f,  0.5f, -0.5f,
-         0.5f,  0.5f, -0.5f,
-         0.5f,  0.5f,  0.5f,
-         0.5f,  0.5f,  0.5f,
-        -0.5f,  0.5f,  0.5f,
-        -0.5f,  0.5f, -0.5f
+        // 顶面  y = +0.5，法线 (0, 1, 0)
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
     };
 
     unsigned int VBO, cubeVAO;
@@ -128,15 +135,19 @@ int main()
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
     glBindVertexArray(cubeVAO);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    // location 0：位置
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    // location 1：法线
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
-    // 灯单独 VAO：复用同一 VBO，只关心位置，避免后续改物体属性布局时影响灯
+    // 灯 VAO：同一 VBO，只读位置（stride 仍是 6 float，跳过法线）
     unsigned int lightVAO;
     glGenVertexArrays(1, &lightVAO);
     glBindVertexArray(lightVAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
     while (!glfwWindowShouldClose(window))
@@ -147,6 +158,11 @@ int main()
 
         processInput(window);
 
+        // 灯绕物体旋转，方便肉眼看到各面明暗随光方向变化
+        lightPos.x = 1.2f * std::cos(currentFrame);
+        lightPos.z = 1.2f * std::sin(currentFrame);
+        lightPos.y = 1.0f;
+
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -154,11 +170,13 @@ int main()
         float aspect = (float)g_ScreenWidth / (float)g_ScreenHeight;
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), aspect, 0.1f, 100.0f);
 
-        // ---------- 绘制被照物体（物体颜色 × 光源颜色）----------
+        // ---------- 被照物体：Ambient + Diffuse + Specular ----------
         lightingShader.use();
-        // 片元着色器逐通道计算：最终颜色 = objectColor * lightColor
         lightingShader.setVec3("objectColor", objectColor.x, objectColor.y, objectColor.z);
         lightingShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
+        lightingShader.setVec3("lightPos", lightPos.x, lightPos.y, lightPos.z);
+        // 高光需要视线方向：传入相机世界坐标
+        lightingShader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
         lightingShader.setMat4("view", view);
         lightingShader.setMat4("projection", projection);
 
@@ -168,7 +186,7 @@ int main()
         glBindVertexArray(cubeVAO);
         glDrawArrays(GL_TRIANGLES, 0, 36);
 
-        // ---------- 绘制灯立方体（显示同一个 lightColor）----------
+        // ---------- 灯立方体：标出当前光源位置与颜色 ----------
         lampShader.use();
         lampShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
         lampShader.setMat4("view", view);
