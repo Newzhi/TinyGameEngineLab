@@ -7,7 +7,7 @@
 | [Day02 基础光照与法线](../Day02/基础光照与法线.md) | Phong 三项、法线 |
 | [Day03 材质 Materials](../Day03/材质Materials.md) | 整物体一套 `Material` 常数 |
 | **本文档** | Diffuse Map / Specular Map / Emission Map、sampler 与纹理单元 |
-| 后续 | 投光物（平行光 / 点光 / 聚光） |
+| [Day05 投光物](../Day05/投光物LightCasters.md) | 平行光 / 点光衰减 / 聚光 |
 
 > **公式说明**：公式用代码块书写，便于 Markdown 预览。
 
@@ -362,10 +362,12 @@ Day03 材质（整物体常数 Material）
   ↓
 Day04 光照贴图（本文）← Diffuse / Specular [/ Emission] Map
   ↓
-投光物（平行光、点光衰减、聚光） / 多光源
+Day05 投光物 ← 平行光 / 点光衰减 / 聚光
+  ↓
+多光源
 ```
 
-之后还会遇到法线贴图、反射贴图等，都是「用贴图调制光照输入」的同一思路延伸。
+之后还会遇到法线贴图、反射贴图等；投光物之后则是把多种光源合进同一场景。
 
 ---
 

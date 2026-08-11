@@ -10,6 +10,8 @@
 
 #include <iostream>
 #include <cmath>
+#include <cstdlib>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -20,6 +22,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow *window);
 unsigned int loadTexture(const char* path);
+void printLightMode();
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
@@ -34,13 +37,59 @@ float lastFrame = 0.0f;
 
 glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
 glm::vec3 lightPos(1.2f, 1.0f, 2.0f);
+glm::vec3 lightDir(-0.2f, -1.0f, -0.3f); // 平行光：从天空朝下
 
-void setLight(const Shader& shader, const glm::vec3& pos, const glm::vec3& color)
+// 0 平行光 | 1 点光 | 2 聚光（手电筒）
+int g_lightType = 0;
+bool g_key1WasDown = false;
+bool g_key2WasDown = false;
+bool g_key3WasDown = false;
+
+const char* lightTypeName(int type)
 {
-    shader.setVec3("light.position", pos.x, pos.y, pos.z);
-    shader.setVec3("light.ambient", color.x * 0.4f, color.y * 0.4f, color.z * 0.4f);
-    shader.setVec3("light.diffuse", color.x * 0.5f, color.y * 0.5f, color.z * 0.5f);
-    shader.setVec3("light.specular", color.x, color.y, color.z);
+    switch (type)
+    {
+    case 0:  return "Directional (parallel / sun)";
+    case 1:  return "Point (with attenuation)";
+    case 2:  return "Spotlight (flashlight)";
+    default: return "Unknown";
+    }
+}
+
+void printLightMode()
+{
+    std::cout << "Light -> " << lightTypeName(g_lightType) << std::endl;
+}
+
+void applyLightUniforms(const Shader& shader, const Camera& camera)
+{
+    shader.setInt("lightType", g_lightType);
+    shader.setVec3("light.ambient",  lightColor.x * 0.1f, lightColor.y * 0.1f, lightColor.z * 0.1f);
+    shader.setVec3("light.diffuse",  lightColor.x * 0.8f, lightColor.y * 0.8f, lightColor.z * 0.8f);
+    shader.setVec3("light.specular", lightColor.x, lightColor.y, lightColor.z);
+
+    // 点光 / 聚光衰减：约覆盖距离 50（Ogre 表）
+    shader.setFloat("light.constant",  1.0f);
+    shader.setFloat("light.linear",    0.09f);
+    shader.setFloat("light.quadratic", 0.032f);
+
+    // 聚光内外切光角（传余弦）
+    shader.setFloat("light.cutOff",      std::cos(glm::radians(12.5f)));
+    shader.setFloat("light.outerCutOff", std::cos(glm::radians(17.5f)));
+
+    if (g_lightType == 0)
+    {
+        shader.setVec3("light.direction", lightDir.x, lightDir.y, lightDir.z);
+    }
+    else if (g_lightType == 1)
+    {
+        shader.setVec3("light.position", lightPos.x, lightPos.y, lightPos.z);
+    }
+    else // 2 手电筒：跟相机
+    {
+        shader.setVec3("light.position",  camera.Position.x, camera.Position.y, camera.Position.z);
+        shader.setVec3("light.direction", camera.Front.x, camera.Front.y, camera.Front.z);
+    }
 }
 
 int main()
@@ -54,7 +103,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Lighting Maps", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Light Casters", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -75,15 +124,13 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
+    Camera camera(glm::vec3(0.0f, 0.0f, 6.0f));
     g_camera = &camera;
 
     Shader lightingShader("shaders/lightTest.vs", "shaders/lightTest.fs");
     Shader lampShader("shaders/lamp.vs", "shaders/lamp.fs");
 
-    // 位置(3) + 法线(3) + UV(2)
     float vertices[] = {
-        // positions          // normals           // texcoords
         -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f,  0.0f,
          0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f,  0.0f,
          0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f,  1.0f,
@@ -127,6 +174,25 @@ int main()
         -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f,  1.0f
     };
 
+    // 随机生成多个箱子位置 + 旋转轴（固定种子，便于复现）
+    const int cubeCount = 10;
+    std::vector<glm::vec3> cubePositions;
+    std::vector<float> cubeAngles;
+    std::vector<glm::vec3> cubeAxes;
+    std::srand(static_cast<unsigned int>(42));
+    for (int i = 0; i < cubeCount; ++i)
+    {
+        float x = (static_cast<float>(std::rand() % 1001) / 1000.0f) * 10.0f - 5.0f;
+        float y = (static_cast<float>(std::rand() % 1001) / 1000.0f) * 6.0f  - 2.0f;
+        float z = (static_cast<float>(std::rand() % 1001) / 1000.0f) * 10.0f - 8.0f;
+        cubePositions.emplace_back(x, y, z);
+        cubeAngles.push_back(static_cast<float>(std::rand() % 360));
+        float ax = (static_cast<float>(std::rand() % 100) + 1) / 100.0f;
+        float ay = (static_cast<float>(std::rand() % 100) + 1) / 100.0f;
+        float az = (static_cast<float>(std::rand() % 100) + 1) / 100.0f;
+        cubeAxes.emplace_back(glm::normalize(glm::vec3(ax, ay, az)));
+    }
+
     unsigned int VBO, cubeVAO;
     glGenVertexArrays(1, &cubeVAO);
     glGenBuffers(1, &VBO);
@@ -135,13 +201,10 @@ int main()
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
     glBindVertexArray(cubeVAO);
-    // position
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    // normal
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    // texcoord
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
@@ -152,7 +215,6 @@ int main()
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // 光照贴图：漫反射 + 镜面
     unsigned int diffuseMap  = loadTexture("Resource/Texture/container2.png");
     unsigned int specularMap = loadTexture("Resource/Texture/container2_specular.png");
 
@@ -161,10 +223,12 @@ int main()
     lightingShader.setInt("material.specular", 1);
     lightingShader.setFloat("material.shininess", 64.0f);
 
-    std::cout << "Lighting Maps Demo\n"
-              << "  diffuse : Resource/Texture/container2.png\n"
-              << "  specular: Resource/Texture/container2_specular.png\n"
-              << "  WASD + mouse to move; light orbits the box\n";
+    std::cout << "Light Casters Demo — " << cubeCount << " random cubes\n"
+              << "  1 Directional light (sun)\n"
+              << "  2 Point light + attenuation (lamp cube orbits)\n"
+              << "  3 Spotlight / flashlight (follows camera)\n"
+              << "  WASD + mouse to move\n";
+    printLightMode();
 
     while (!glfwWindowShouldClose(window))
     {
@@ -174,11 +238,12 @@ int main()
 
         processInput(window);
 
-        lightPos.x = 1.2f * std::cos(currentFrame);
-        lightPos.z = 1.2f * std::sin(currentFrame);
-        lightPos.y = 1.0f;
+        // 点光：灯绕场景中心旋转，便于看出近亮远暗
+        lightPos.x = 2.0f * std::cos(currentFrame * 0.8f);
+        lightPos.z = 2.0f * std::sin(currentFrame * 0.8f);
+        lightPos.y = 1.5f;
 
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = camera.GetViewMatrix();
@@ -186,13 +251,10 @@ int main()
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), aspect, 0.1f, 100.0f);
 
         lightingShader.use();
-        setLight(lightingShader, lightPos, lightColor);
+        applyLightUniforms(lightingShader, camera);
         lightingShader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
         lightingShader.setMat4("view", view);
         lightingShader.setMat4("projection", projection);
-
-        glm::mat4 model = glm::mat4(1.0f);
-        lightingShader.setMat4("model", model);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, diffuseMap);
@@ -200,20 +262,32 @@ int main()
         glBindTexture(GL_TEXTURE_2D, specularMap);
 
         glBindVertexArray(cubeVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
+        for (int i = 0; i < cubeCount; ++i)
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[i]);
+            float angle = cubeAngles[i] + currentFrame * 15.0f;
+            model = glm::rotate(model, glm::radians(angle), cubeAxes[i]);
+            lightingShader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
 
-        lampShader.use();
-        lampShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
-        lampShader.setMat4("view", view);
-        lampShader.setMat4("projection", projection);
+        // 仅点光模式画出灯立方体
+        if (g_lightType == 1)
+        {
+            lampShader.use();
+            lampShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
+            lampShader.setMat4("view", view);
+            lampShader.setMat4("projection", projection);
 
-        model = glm::mat4(1.0f);
-        model = glm::translate(model, lightPos);
-        model = glm::scale(model, glm::vec3(0.2f));
-        lampShader.setMat4("model", model);
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, lightPos);
+            model = glm::scale(model, glm::vec3(0.2f));
+            lampShader.setMat4("model", model);
 
-        glBindVertexArray(lightVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
+            glBindVertexArray(lightVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -284,6 +358,20 @@ void processInput(GLFWwindow *window)
         g_camera->ProcessKeyboard(LEFT, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         g_camera->ProcessKeyboard(RIGHT, deltaTime);
+
+    auto trySwitch = [](GLFWwindow* win, int key, bool& wasDown, int type) {
+        bool down = glfwGetKey(win, key) == GLFW_PRESS;
+        if (down && !wasDown)
+        {
+            g_lightType = type;
+            printLightMode();
+        }
+        wasDown = down;
+    };
+
+    trySwitch(window, GLFW_KEY_1, g_key1WasDown, 0);
+    trySwitch(window, GLFW_KEY_2, g_key2WasDown, 1);
+    trySwitch(window, GLFW_KEY_3, g_key3WasDown, 2);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
