@@ -9,5 +9,6 @@ LearnOpenGL「光照」阶段学习笔记，按天组织：
 | [Day03](./Day03/) | 材质 Material：物体/灯光属性拆分与 Phong 调参 |
 | [Day04](./Day04/) | 光照贴图：Diffuse / Specular / Emission Map |
 | [Day05](./Day05/) | 投光物：平行光 / 点光衰减 / 聚光（手电筒） |
+| [Day06](./Day06/) | 多光源：贡献相加、GLSL 函数与数组 uniform |
 
 建议先完成 Part1（尤其 Day06 MVP、Day07 相机，以及纹理基础）再进入本部分。

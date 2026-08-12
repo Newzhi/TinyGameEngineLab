@@ -8,7 +8,7 @@
 当前项目 GLM 位置：
 
 ```
-Proj/includes/glm/     ← GLM 1.0.3，header-only
+Proj/../Depends/glm/     ← GLM（header-only，第三方统一在 Depends）
 ```
 
 CMake 已通过 `includes/` 配置头文件路径，代码里直接：
