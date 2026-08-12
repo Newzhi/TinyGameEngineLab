@@ -331,6 +331,8 @@ glUniform4f(vertexColorLocation, 0.0f, greenValue, 0.0f, 1.0f);
 
 > **注意**：`glUniform*` 必须在 **`glUseProgram` 之后** 调用，否则不知道往哪个 Program 写。
 
+> **深入**：Uniform 为何能把 CPU 变量送进 GPU、location 与 `Shader.h` 如何封装 → [Uniform 原理与实现机制](./Uniform原理与实现机制.md)。
+
 #### 若要用 Uniform 控制整体颜色，Shader 应改成：
 
 片段着色器示例（**Uniform 版本**，与当前 Attribute 版本二选一或组合使用）：

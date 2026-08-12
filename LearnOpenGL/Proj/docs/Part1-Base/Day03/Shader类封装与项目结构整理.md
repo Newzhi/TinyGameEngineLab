@@ -221,6 +221,8 @@ ourShader.setFloat("brightness", 0.8f);
 
 比手写两行更简洁，也不容易因为 program 没激活就查 location 而出 bug（`use()` 之后调就没问题）。
 
+实现原理（Program / location / 为何能传参）见：[Uniform 原理与实现机制](./Uniform原理与实现机制.md)。
+
 当前支持的类型：
 
 | 方法 | 对应 GLSL 类型 | 对应 OpenGL API |

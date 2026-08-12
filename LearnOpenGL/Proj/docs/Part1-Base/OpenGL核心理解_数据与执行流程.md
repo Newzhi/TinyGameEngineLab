@@ -218,6 +218,8 @@ uniform mat4 view;
 uniform mat4 projection;
 ```
 
+**为何能传、API 如何实现**：见 [Day03 — Uniform 原理与实现机制](./Day03/Uniform原理与实现机制.md)（`glGetUniformLocation` + `glUniform*` + `Shader.h`）。
+
 ------------------------------------------------------------------------
 
 ## Attribute
