@@ -7,6 +7,7 @@
 | Part2 多光源 / 光照贴图 | 箱子是手写立方体顶点 |
 | **本文档** | Assimp 是什么、Scene / Node / Mesh、本工程如何本地接入 |
 | [Day02 网格 Mesh](../Day02/网格Mesh类.md) | Vertex / Texture / Mesh 类与绘制 |
+| [Day03 模型 Model](../Day03/模型Model类.md) | 递归加载、材质贴图、背包 Demo |
 
 > 官网原文写的是 Assimp 3.1.1；本工程使用 **Assimp 5.4.3**（能力与思路相同，API 大方向兼容）。
 
@@ -219,7 +220,7 @@ Part3 Day01 Assimp（本文）← 库与数据结构、工程接入
   ↓
 Part3 Day02 Mesh ← 单个可绘制网格
   ↓
-Model 类（递归节点、组合多个 Mesh）
+Part3 Day03 Model ← 递归节点、组合多个 Mesh、场景绘制
 ```
 
 ---
