@@ -26,8 +26,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${DEPENDS_DIR}/assimp-5.4.3" "${CMAKE_BINARY_DIR}/_deps/assimp")
 
 # ---------- GLAD ----------
-add_library(glad STATIC "${DEPENDS_DIR}/glad/src/glad.c"
-        src/headfile/Mesh.h)
+add_library(glad STATIC "${DEPENDS_DIR}/glad/src/glad.c")
 target_include_directories(glad PUBLIC "${DEPENDS_DIR}/glad/include")
 
 add_executable(main

@@ -6,7 +6,7 @@
 |------|------|
 | [Day05 投光物](../Day05/投光物LightCasters.md) | 三种灯各自怎么算（一次只用一种） |
 | **本文档** | 多盏灯叠加、GLSL 函数封装、数组 uniform、术语中英对照 |
-| 后续 | Part2 复习 / 模型加载 |
+| 后续 | [Part3 模型加载 — Assimp](../../Part3-LoadModel/Day01/Assimp模型导入库.md) |
 
 > **公式说明**：公式用代码块书写，便于 Markdown 预览。
 
@@ -325,7 +325,9 @@ Day05 投光物（一次一种灯）
   ↓
 Day06 多光源（本文）← 函数封装 + 贡献相加
   ↓
-Part2 复习 / 进入模型加载
+Part3 Day01 Assimp ← 模型导入库
+  ↓
+Mesh / Model 类
 ```
 
 ---
