@@ -6,6 +6,7 @@
 
 #include "../headfile/Shader.h"
 #include "../headfile/Camera.h"
+#include "../headfile/Model.h"
 #include "stb_image.h"
 
 #include <iostream>
@@ -143,6 +144,10 @@ int main()
 
     Shader lightingShader("shaders/lightTest.vs", "shaders/lightTest.fs");
     Shader lampShader("shaders/lamp.vs", "shaders/lamp.fs");
+    Shader modelShader("shaders/model.vs", "shaders/model.fs");
+
+    // 加载 Assimp 模型（路径用正斜杠，Model 内部按 '/' 截目录）
+    Model backpackModel("Resource/TestLoadModel/backpack.obj");
 
     float vertices[] = {
         -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f,  0.0f,
@@ -276,6 +281,21 @@ int main()
             model = glm::rotate(model, glm::radians(angle), cubeAxes[i]);
             lightingShader.setMat4("model", model);
             glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
+
+        // 绘制 Assimp 加载的背包模型（复用同一套多光源）
+        modelShader.use();
+        applyMultipleLights(modelShader, camera);
+        modelShader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
+        modelShader.setMat4("view", view);
+        modelShader.setMat4("projection", projection);
+        modelShader.setFloat("material.shininess", 32.0f);
+        {
+            glm::mat4 modelMat = glm::mat4(1.0f);
+            modelMat = glm::translate(modelMat, glm::vec3(0.0f, 0.0f, 0.0f));
+            modelMat = glm::scale(modelMat, glm::vec3(1.0f));
+            modelShader.setMat4("model", modelMat);
+            backpackModel.Draw(modelShader);
         }
 
         // 四个点光小立方体（颜色与点光一致）

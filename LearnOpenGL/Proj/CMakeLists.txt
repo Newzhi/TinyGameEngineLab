@@ -34,6 +34,8 @@ add_executable(main
     src/cppfile/stb_image_impl.cpp
     src/headfile/Shader.h
     src/headfile/Camera.h
+    src/headfile/Mesh.h
+    src/headfile/Model.h
 )
 
 target_include_directories(main PRIVATE

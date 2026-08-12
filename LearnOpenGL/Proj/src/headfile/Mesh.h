@@ -16,18 +16,22 @@
 // 单个顶点：位置 + 法线 + UV（内存连续，便于整块上传到 VBO）
 // ---------------------------------------------------------------------------
 struct Vertex {
-    glm::vec3 Position;   // 位置
-    glm::vec3 Normal;     // 法线（光照）
-    glm::vec2 TexCoords;  // 纹理坐标
+    glm::vec3 Position;    // 位置
+    glm::vec3 Normal;      // 法线（光照）
+    glm::vec2 TexCoords;   // 纹理坐标
+    glm::vec3 Tangent;     // 切线（法线贴图/切线空间需要）
+    glm::vec3 Bitangent;   // 副切线
 };
 
 // ---------------------------------------------------------------------------
-// 一张已上传到 GPU 的纹理：OpenGL 纹理 id + 类型名
+// 一张已上传到 GPU 的纹理：OpenGL 纹理 id + 类型名 + 原始路径
 // type 约定："texture_diffuse" / "texture_specular"（后面拼序号 1,2,...）
+// path 用于去重：同一模型里同名贴图只加载一次
 // ---------------------------------------------------------------------------
 struct Texture {
-    unsigned int id;   // glGenTextures 得到的纹理对象
-    std::string type;  // 贴图种类，供 Draw 时拼 uniform 名
+    unsigned int id;    // glGenTextures 得到的纹理对象
+    std::string type;   // 贴图种类，供 Draw 时拼 uniform 名
+    std::string path;   // 贴图在磁盘上的相对路径（来自材质）
 };
 
 // ---------------------------------------------------------------------------
@@ -58,6 +62,8 @@ public:
     {
         unsigned int diffuseNr  = 1;
         unsigned int specularNr = 1;
+        unsigned int normalNr   = 1;
+        unsigned int heightNr   = 1;
 
         for (unsigned int i = 0; i < textures.size(); i++)
         {
@@ -71,6 +77,10 @@ public:
                 number = std::to_string(diffuseNr++);
             else if (name == "texture_specular")
                 number = std::to_string(specularNr++);
+            else if (name == "texture_normal")
+                number = std::to_string(normalNr++);
+            else if (name == "texture_height")
+                number = std::to_string(heightNr++);
 
             // 告诉 shader：名为 material.xxxN 的 sampler 使用纹理单元 i
             // （具体命名可按你的 FS 调整；教程示例带 material. 前缀）
@@ -130,6 +140,16 @@ private:
         glEnableVertexAttribArray(2);
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                               reinterpret_cast<void*>(offsetof(Vertex, TexCoords)));
+
+        // location 3：切线 Tangent
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                              reinterpret_cast<void*>(offsetof(Vertex, Tangent)));
+
+        // location 4：副切线 Bitangent
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                              reinterpret_cast<void*>(offsetof(Vertex, Bitangent)));
 
         glBindVertexArray(0);
     }
