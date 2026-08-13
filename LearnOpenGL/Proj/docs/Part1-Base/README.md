@@ -12,4 +12,4 @@ LearnOpenGL「入门」阶段的学习笔记，按天组织：
 | [Day06](./Day06/) | 坐标系统、投影矩阵、MVP 立方体 |
 | [Day07](./Day07/) | 摄像机系统、鼠标回调与 FPS 控制 |
 
-建议按 Day 编号顺序阅读。
+建议先读 [Part0 工程与构建基础](../Part0-CppBuild/README.md)，再按本部分 Day 编号顺序阅读。
