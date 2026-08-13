@@ -66,5 +66,10 @@ add_custom_command(TARGET main POST_BUILD
             ${CMAKE_CURRENT_BINARY_DIR}/shaders
     COMMENT "Syncing shaders to build directory")
 
-# 模型/贴图体积大且很少变，配置期拷一次即可
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/Resource DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# 模型/贴图同样每次构建同步：configure 期的 file(COPY) 只跑一次，
+# 之后新增的贴图不会进构建目录，运行时 stbi_load 会静默失败。
+add_custom_command(TARGET main POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/Resource
+            ${CMAKE_CURRENT_BINARY_DIR}/Resource
+    COMMENT "Syncing resources to build directory")

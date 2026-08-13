@@ -5,10 +5,11 @@
 
 #include "../headfile/Shader.h"
 #include "../headfile/Camera.h"
-#include "../headfile/Model.h"
+
+#include <stb_image.h>
 
 #include <iostream>
-#include <cmath>
+#include <map>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -18,22 +19,12 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
-void applySimpleDirLight(const Shader& shader, const Camera& camera);
-
-// 绕平面 z = mirrorZ、法线 +Z 的反射矩阵：P' = T(z)·S(1,1,-1)·T(-z)·P
-glm::mat4 makePlanarReflectionMatrix(float mirrorZ);
-void drawFloor(const Shader& shader, unsigned int vao, const glm::mat4& model);
-void drawBackpacks(Shader& shader, Model& backpack,
-                   const std::vector<glm::vec3>& positions, float scale,
-                   const glm::mat4& preTransform);
+unsigned int loadTexture(const char* path);
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 const float CAMERA_NEAR_PLANE = 0.1f;
 const float CAMERA_FAR_PLANE = 100.0f;
-
-// 镜子所在平面：z = MIRROR_Z，朝向 +Z（相机从 z> MIRROR_Z 一侧看过去）
-const float MIRROR_Z = -3.0f;
 
 unsigned int g_ScreenWidth = SCR_WIDTH;
 unsigned int g_ScreenHeight = SCR_HEIGHT;
@@ -43,82 +34,60 @@ float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
 // ---------------------------------------------------------------------------
-// Part4 Day02：平面镜子（Stencil Mirror）
+// Part4 Day03：混合 Blending
+// 对照官网 4.advanced_opengl/3.1.blending_discard 与 3.2.blending_sorted，
+// 把两个示例合到同一个场景里：
 //
-// 流程：
-//   1) 先画真实世界（地板 + 背包），不写模板
-//   2) 画镜面四边形：只写入模板 = 1（关颜色 / 关深度写入）
-//   3) 仅在模板 == 1 处，用反射矩阵再画一遍场景 → 镜中倒影
-//   4) 半透明镜面 + 镜框，让镜子「有玻璃感」
-//
-// 注意：本 Demo 把所有物体放在镜子前方，避免镜后物体被错误反射；
-//       完整实现还需裁剪平面（gl_ClipDistance）。
+//   1) 不透明：地板 + 两个箱子，正常深度测试
+//   2) 草（左半场景）：alpha < 0.1 时 discard，透明像素不写颜色也不写深度
+//   3) 窗户（右半场景）：开 GL_BLEND，按到相机的距离「从远到近」绘制
 // ---------------------------------------------------------------------------
 
-glm::mat4 makePlanarReflectionMatrix(float mirrorZ)
+// 官网 loadTexture：按通道数选 format，RGBA 用 CLAMP_TO_EDGE 防半透明边框
+unsigned int loadTexture(const char* path)
 {
-    glm::mat4 m(1.0f);
-    m = glm::translate(m, glm::vec3(0.0f, 0.0f, mirrorZ));
-    m = glm::scale(m, glm::vec3(1.0f, 1.0f, -1.0f));
-    m = glm::translate(m, glm::vec3(0.0f, 0.0f, -mirrorZ));
-    return m;
-}
+    unsigned int textureID = 0;
+    glGenTextures(1, &textureID);
 
-void applySimpleDirLight(const Shader& shader, const Camera& camera)
-{
-    shader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
-
-    shader.setVec3("dirLight.direction", -0.3f, -1.0f, -0.4f);
-    shader.setVec3("dirLight.ambient",  0.35f, 0.35f, 0.35f);
-    shader.setVec3("dirLight.diffuse",  0.85f, 0.85f, 0.85f);
-    shader.setVec3("dirLight.specular", 0.4f, 0.4f, 0.4f);
-
-    for (int i = 0; i < 4; ++i)
+    int width = 0, height = 0, nrComponents = 0;
+    // 官网本章不做垂直翻转；四边形的 UV 已经把 y 反着写（见 transparentVertices）
+    // Model.h 的 TextureFromFile 会把这个全局状态设成 true，这里显式复位
+    stbi_set_flip_vertically_on_load(false);
+    unsigned char* data = stbi_load(path, &width, &height, &nrComponents, 0);
+    if (data)
     {
-        std::string base = "pointLights[" + std::to_string(i) + "]";
-        shader.setVec3(base + ".position", 0.0f, 0.0f, 0.0f);
-        shader.setVec3(base + ".ambient",  0.0f, 0.0f, 0.0f);
-        shader.setVec3(base + ".diffuse",  0.0f, 0.0f, 0.0f);
-        shader.setVec3(base + ".specular", 0.0f, 0.0f, 0.0f);
-        shader.setFloat(base + ".constant",  1.0f);
-        shader.setFloat(base + ".linear",    0.09f);
-        shader.setFloat(base + ".quadratic", 0.032f);
+        GLenum format = GL_RGB;
+        if (nrComponents == 1)
+            format = GL_RED;
+        else if (nrComponents == 3)
+            format = GL_RGB;
+        else if (nrComponents == 4)
+            format = GL_RGBA;   // 有 alpha 通道，discard / blend 才有数据可用
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(format), width, height, 0,
+                     format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        // GL_REPEAT 会让顶部边缘和底部边缘插值，alpha 图上会出现一圈半透明色边
+        GLint wrap = (format == GL_RGBA) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+        std::cout << "Loaded texture: " << path
+                  << " (" << width << "x" << height << ", " << nrComponents << " ch)" << std::endl;
     }
-    shader.setVec3("spotLight.position",  0.0f, 0.0f, 0.0f);
-    shader.setVec3("spotLight.direction", 0.0f, -1.0f, 0.0f);
-    shader.setVec3("spotLight.ambient",   0.0f, 0.0f, 0.0f);
-    shader.setVec3("spotLight.diffuse",   0.0f, 0.0f, 0.0f);
-    shader.setVec3("spotLight.specular",  0.0f, 0.0f, 0.0f);
-    shader.setFloat("spotLight.cutOff",      std::cos(glm::radians(12.5f)));
-    shader.setFloat("spotLight.outerCutOff", std::cos(glm::radians(17.5f)));
-    shader.setFloat("spotLight.constant",  1.0f);
-    shader.setFloat("spotLight.linear",    0.09f);
-    shader.setFloat("spotLight.quadratic", 0.032f);
-}
-
-void drawFloor(const Shader& shader, unsigned int vao, const glm::mat4& model)
-{
-    shader.setMat4("model", model);
-    shader.setVec3("uColor", 0.28f, 0.30f, 0.32f);
-    shader.setFloat("uAlpha", 1.0f);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-}
-
-void drawBackpacks(Shader& shader, Model& backpack,
-                   const std::vector<glm::vec3>& positions, float scale,
-                   const glm::mat4& preTransform)
-{
-    for (const glm::vec3& pos : positions)
+    else
     {
-        glm::mat4 model(1.0f);
-        model = glm::translate(model, pos);
-        model = glm::scale(model, glm::vec3(scale));
-        // 反射遍：先把物体变到镜中坐标，再乘自身 TRS
-        model = preTransform * model;
-        shader.setMat4("model", model);
-        backpack.Draw(shader);
+        // 贴图没拷进构建目录时会走到这里：采样不到 alpha，discard 会「失效」
+        std::cout << "Texture failed to load at path: " << path << std::endl;
+        stbi_image_free(data);
     }
+
+    return textureID;
 }
 
 int main()
@@ -133,7 +102,7 @@ int main()
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Stencil Mirror", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Blending", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -153,107 +122,148 @@ int main()
     }
 
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_STENCIL_TEST);
-    glEnable(GL_CULL_FACE);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    // 标准 alpha 混合：结果 = src.a * src + (1 - src.a) * dst
+    // 这里只做设置，实际开关放在窗户那一遍（草用 discard，不需要混合）
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    Camera camera(glm::vec3(0.0f, 1.4f, 4.5f));
+    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    Shader modelShader("shaders/model.vs", "shaders/model.fs");
-    Shader colorShader("shaders/outline.vs", "shaders/outline.fs");
+    Shader shader("shaders/blending.vs", "shaders/blending.fs");
+    Shader shaderDiscard("shaders/blending.vs", "shaders/blendingDiscard.fs");
 
-    Model backpack("Resource/TestLoadModel/backpack.obj");
+    float cubeVertices[] = {
+        // positions          // texture Coords
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
 
-    // 地板：y = -0.5 的 XZ 平面（绕序保证法线 +Y，配合 Cull Back）
-    float floorVertices[] = {
-         6.0f, -0.5f,  4.0f,
-        -6.0f, -0.5f, -6.0f,
-        -6.0f, -0.5f,  4.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
 
-         6.0f, -0.5f,  4.0f,
-         6.0f, -0.5f, -6.0f,
-        -6.0f, -0.5f, -6.0f
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
     };
 
-    // 镜面：竖直放在 z = MIRROR_Z，面向 +Z
-    // 注意绕序：从 +Z 看过去为 CCW，配合默认 Cull Back
-    float mirrorVertices[] = {
-        // 玻璃（内框）
-        -1.6f, 0.0f, 0.0f,
-         1.6f, 0.0f, 0.0f,
-         1.6f, 2.4f, 0.0f,
+    float planeVertices[] = {
+        // positions          // texture Coords（UV 到 2.0，配合 GL_REPEAT 铺两遍）
+         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
+        -5.0f, -0.5f,  5.0f,  0.0f, 0.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
 
-        -1.6f, 0.0f, 0.0f,
-         1.6f, 2.4f, 0.0f,
-        -1.6f, 2.4f, 0.0f
+         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
+         5.0f, -0.5f, -5.0f,  2.0f, 2.0f
     };
 
-    // 镜框：比玻璃略大一圈，稍后画在玻璃外围（用两个四边形差不太方便，
-    // 这里直接画一整块大框，再在上面「挖」玻璃区域——实际用前后两层：
-    // 先画大框不透明，玻璃区域会被后续半透明覆盖。简化：四条边四边形。）
-    float frameVertices[] = {
-        // 底
-        -1.85f, -0.12f, 0.0f,  1.85f, -0.12f, 0.0f,  1.85f,  0.00f, 0.0f,
-        -1.85f, -0.12f, 0.0f,  1.85f,  0.00f, 0.0f, -1.85f,  0.00f, 0.0f,
-        // 顶
-        -1.85f,  2.40f, 0.0f,  1.85f,  2.40f, 0.0f,  1.85f,  2.52f, 0.0f,
-        -1.85f,  2.40f, 0.0f,  1.85f,  2.52f, 0.0f, -1.85f,  2.52f, 0.0f,
-        // 左
-        -1.85f,  0.00f, 0.0f, -1.60f,  0.00f, 0.0f, -1.60f,  2.40f, 0.0f,
-        -1.85f,  0.00f, 0.0f, -1.60f,  2.40f, 0.0f, -1.85f,  2.40f, 0.0f,
-        // 右
-         1.60f,  0.00f, 0.0f,  1.85f,  0.00f, 0.0f,  1.85f,  2.40f, 0.0f,
-         1.60f,  0.00f, 0.0f,  1.85f,  2.40f, 0.0f,  1.60f,  2.40f, 0.0f
+    // 草 / 窗户共用的竖直四边形，面向 +Z
+    // UV 的 y 是反着写的（上顶点配 0.0）：因为加载时没有翻转图片，
+    // 图片第一行在 v=0 一侧。和官网注释 "swapped y coordinates" 一致。
+    float transparentVertices[] = {
+        // positions         // texture Coords
+         0.0f,  0.5f,  0.0f,  0.0f, 0.0f,
+         0.0f, -0.5f,  0.0f,  0.0f, 1.0f,
+         1.0f, -0.5f,  0.0f,  1.0f, 1.0f,
+
+         0.0f,  0.5f,  0.0f,  0.0f, 0.0f,
+         1.0f, -0.5f,  0.0f,  1.0f, 1.0f,
+         1.0f,  0.5f,  0.0f,  1.0f, 0.0f
     };
 
-    unsigned int floorVAO = 0, floorVBO = 0;
-    glGenVertexArrays(1, &floorVAO);
-    glGenBuffers(1, &floorVBO);
-    glBindVertexArray(floorVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, floorVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(floorVertices), floorVertices, GL_STATIC_DRAW);
+    unsigned int cubeVAO = 0, cubeVBO = 0;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
 
-    unsigned int mirrorVAO = 0, mirrorVBO = 0;
-    glGenVertexArrays(1, &mirrorVAO);
-    glGenBuffers(1, &mirrorVBO);
-    glBindVertexArray(mirrorVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, mirrorVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(mirrorVertices), mirrorVertices, GL_STATIC_DRAW);
+    unsigned int planeVAO = 0, planeVBO = 0;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
 
-    unsigned int frameVAO = 0, frameVBO = 0;
-    glGenVertexArrays(1, &frameVAO);
-    glGenBuffers(1, &frameVBO);
-    glBindVertexArray(frameVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, frameVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(frameVertices), frameVertices, GL_STATIC_DRAW);
+    unsigned int transparentVAO = 0, transparentVBO = 0;
+    glGenVertexArrays(1, &transparentVAO);
+    glGenBuffers(1, &transparentVBO);
+    glBindVertexArray(transparentVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, transparentVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(transparentVertices), transparentVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
     glBindVertexArray(0);
 
-    // 全部放在镜子前方（z > MIRROR_Z），避免镜后几何被错误翻到镜前
-    std::vector<glm::vec3> objectPositions = {
-        glm::vec3(-1.0f, 0.0f, -0.2f),
-        glm::vec3( 1.1f, 0.0f, -1.2f)
+    unsigned int cubeTexture   = loadTexture("Resource/Texture/container2.png");
+    unsigned int floorTexture  = loadTexture("Resource/Texture/container.jpg");
+    unsigned int grassTexture  = loadTexture("Resource/Texture/grass.png");
+    unsigned int windowTexture = loadTexture("Resource/Texture/blending_transparent_window.png");
+
+    // 草：官网原始位置
+    std::vector<glm::vec3> vegetation = {
+        glm::vec3(-1.5f, 0.0f, -0.48f),
+        glm::vec3( 1.5f, 0.0f,  0.51f),
+        glm::vec3( 0.0f, 0.0f,  0.7f),
+        glm::vec3(-0.3f, 0.0f, -2.3f),
+        glm::vec3( 0.5f, 0.0f, -0.6f)
     };
-    const float objectScale = 0.5f;
 
-    const glm::mat4 reflectionMat = makePlanarReflectionMatrix(MIRROR_Z);
-    const glm::mat4 identity(1.0f);
+    // 窗户：整体挪到 -X 一侧，和草分开，方便分别观察两种做法
+    std::vector<glm::vec3> windows;
+    windows.reserve(vegetation.size());
+    for (const glm::vec3& pos : vegetation)
+        windows.push_back(pos - glm::vec3(3.5f, 0.0f, 0.0f));
 
-    // 镜子自己的 model：挪到 z = MIRROR_Z
-    glm::mat4 mirrorModel(1.0f);
-    mirrorModel = glm::translate(mirrorModel, glm::vec3(0.0f, 0.0f, MIRROR_Z));
+    shader.use();
+    shader.setInt("texture1", 0);
+    shaderDiscard.use();
+    shaderDiscard.setInt("texture1", 0);
 
-    std::cout << "Stencil Mirror Demo\n"
-              << "  1) draw real scene\n"
-              << "  2) write mirror shape into stencil\n"
-              << "  3) draw reflected scene where stencil == 1\n"
-              << "  4) translucent glass + frame\n"
+    std::cout << "Blending Demo\n"
+              << "  right side : grass  -> discard (alpha < 0.1)\n"
+              << "  left  side : window -> GL_BLEND, sorted far to near\n"
               << "  WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
@@ -264,8 +274,8 @@ int main()
 
         processInput(window);
 
-        glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = camera.GetViewMatrix();
         float aspect = static_cast<float>(g_ScreenWidth) / static_cast<float>(g_ScreenHeight);
@@ -273,106 +283,94 @@ int main()
             glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
 
         // ================================================================
-        // 1) 真实场景：不写模板
+        // 1) 不透明物体：先画完，透明物体才有正确的「背景」可混合
         // ================================================================
-        glStencilMask(0x00);
-        glCullFace(GL_BACK);
+        shader.use();
+        shader.setMat4("view", view);
+        shader.setMat4("projection", projection);
 
-        colorShader.use();
-        colorShader.setMat4("view", view);
-        colorShader.setMat4("projection", projection);
-        drawFloor(colorShader, floorVAO, identity);
+        glBindVertexArray(cubeVAO);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, cubeTexture);
+        {
+            glm::mat4 model(1.0f);
+            model = glm::translate(model, glm::vec3(-1.0f, 0.0f, -1.0f));
+            shader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
 
-        modelShader.use();
-        applySimpleDirLight(modelShader, camera);
-        modelShader.setMat4("view", view);
-        modelShader.setMat4("projection", projection);
-        modelShader.setFloat("material.shininess", 32.0f);
-        drawBackpacks(modelShader, backpack, objectPositions, objectScale, identity);
+            model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(2.0f, 0.0f, 0.0f));
+            shader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
 
-        // ================================================================
-        // 2) 镜面写入模板 = 1（不写颜色、不写深度）
-        //    深度不写：镜中物体才能画进「洞」里；前方物体已有深度，会正确挡住倒影
-        // ================================================================
-        glStencilFunc(GL_ALWAYS, 1, 0xFF);
-        glStencilMask(0xFF);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        glDepthMask(GL_FALSE);
-
-        colorShader.use();
-        colorShader.setMat4("view", view);
-        colorShader.setMat4("projection", projection);
-        colorShader.setMat4("model", mirrorModel);
-        colorShader.setVec3("uColor", 1.0f, 1.0f, 1.0f);
-        colorShader.setFloat("uAlpha", 1.0f);
-        glBindVertexArray(mirrorVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_TRUE);
+        glBindVertexArray(planeVAO);
+        glBindTexture(GL_TEXTURE_2D, floorTexture);
+        {
+            glm::mat4 model(1.0f);
+            shader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
         // ================================================================
-        // 3) 只在模板 == 1 处画反射场景
-        //    反射矩阵会翻转绕序 → 临时 Cull Front，避免画到背面
+        // 2) 草：非透即不透，用 discard 处理
+        //    透明片段被丢弃 → 不写深度 → 不需要按距离排序
         // ================================================================
-        glStencilFunc(GL_EQUAL, 1, 0xFF);
-        glStencilMask(0x00);
-        glCullFace(GL_FRONT);
+        shaderDiscard.use();
+        shaderDiscard.setMat4("view", view);
+        shaderDiscard.setMat4("projection", projection);
 
-        colorShader.use();
-        colorShader.setMat4("view", view);
-        colorShader.setMat4("projection", projection);
-        drawFloor(colorShader, floorVAO, reflectionMat);
-
-        modelShader.use();
-        applySimpleDirLight(modelShader, camera);
-        modelShader.setMat4("view", view);
-        modelShader.setMat4("projection", projection);
-        modelShader.setFloat("material.shininess", 32.0f);
-        drawBackpacks(modelShader, backpack, objectPositions, objectScale, reflectionMat);
-
-        glCullFace(GL_BACK);
+        glBindVertexArray(transparentVAO);
+        glBindTexture(GL_TEXTURE_2D, grassTexture);
+        for (const glm::vec3& pos : vegetation)
+        {
+            glm::mat4 model(1.0f);
+            model = glm::translate(model, pos);
+            shaderDiscard.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
         // ================================================================
-        // 4) 半透明玻璃 + 不透明镜框（不再改模板）
+        // 3) 窗户：真正的半透明，必须开混合并按距离从远到近画
+        //    深度缓冲不认识 alpha：先画近处窗户会把远处窗户整块挡掉
         // ================================================================
-        glStencilFunc(GL_ALWAYS, 0, 0xFF);
-        glStencilMask(0x00);
+        std::map<float, glm::vec3> sorted;
+        for (const glm::vec3& pos : windows)
+        {
+            float distance = glm::length(camera.Position - pos);
+            sorted[distance] = pos;   // map 按 key 自动升序
+        }
 
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        // 玻璃略写入深度，避免后续乱序；用较小 alpha 保留倒影
-        colorShader.use();
-        colorShader.setMat4("view", view);
-        colorShader.setMat4("projection", projection);
-        colorShader.setMat4("model", mirrorModel);
-        colorShader.setVec3("uColor", 0.55f, 0.70f, 0.85f);
-        colorShader.setFloat("uAlpha", 0.18f);
-        glBindVertexArray(mirrorVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        shader.use();
+        shader.setMat4("view", view);
+        shader.setMat4("projection", projection);
+
+        glBindVertexArray(transparentVAO);
+        glBindTexture(GL_TEXTURE_2D, windowTexture);
+        // 反向迭代：距离大的先画
+        for (auto it = sorted.rbegin(); it != sorted.rend(); ++it)
+        {
+            glm::mat4 model(1.0f);
+            model = glm::translate(model, it->second);
+            shader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
         glDisable(GL_BLEND);
-
-        colorShader.setVec3("uColor", 0.15f, 0.12f, 0.10f);
-        colorShader.setFloat("uAlpha", 1.0f);
-        colorShader.setMat4("model", mirrorModel);
-        glBindVertexArray(frameVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 24);
-
-        // 恢复状态
-        glStencilMask(0xFF);
-        glStencilFunc(GL_ALWAYS, 0, 0xFF);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
     g_camera = nullptr;
-    glDeleteVertexArrays(1, &floorVAO);
-    glDeleteBuffers(1, &floorVBO);
-    glDeleteVertexArrays(1, &mirrorVAO);
-    glDeleteBuffers(1, &mirrorVBO);
-    glDeleteVertexArrays(1, &frameVAO);
-    glDeleteBuffers(1, &frameVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteVertexArrays(1, &transparentVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteBuffers(1, &transparentVBO);
     glfwTerminate();
     return 0;
 }

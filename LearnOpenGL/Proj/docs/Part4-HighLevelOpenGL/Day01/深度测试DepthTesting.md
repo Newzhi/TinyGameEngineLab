@@ -7,6 +7,7 @@
 | Part1 坐标系统 / MVP | 已经开过 `glEnable(GL_DEPTH_TEST)`，但只当「不穿帮」用 |
 | **本文档** | 深度测试流程、深度函数、非线性精度、可视化、Z-fighting、Early-Z/Pre-Z |
 | [Day02 模板测试](../Day02/模板测试StencilTesting.md) | 像素标签、轮廓描边、Func/Op/Mask |
+| [Day03 混合](../Day03/混合Blending.md) | alpha、`discard`、半透明排序 |
 
 **工程对照**：`main.cpp` 里已有启用深度测试与每帧清除深度缓冲。
 
@@ -429,7 +430,9 @@ Part4 Day01 深度测试（本文）← 原理 + Early-Z/Pre-Z
   ↓
 Part4 Day02 模板测试 ← 像素标签 + 物体轮廓
   ↓
-混合 → 面剔除 → 帧缓冲 …
+Part4 Day03 混合 ← discard + BlendFunc + 排序
+  ↓
+面剔除 → 帧缓冲 …
 ```
 
 ---
