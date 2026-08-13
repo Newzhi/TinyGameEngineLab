@@ -6,7 +6,7 @@
 |------|------|
 | Part1 坐标系统 / MVP | 已经开过 `glEnable(GL_DEPTH_TEST)`，但只当「不穿帮」用 |
 | **本文档** | 深度测试流程、深度函数、非线性精度、可视化、Z-fighting、Early-Z/Pre-Z |
-| 后续 | 模板测试、混合、帧缓冲…… |
+| [Day02 模板测试](../Day02/模板测试StencilTesting.md) | 像素标签、轮廓描边、Func/Op/Mask |
 
 **工程对照**：`main.cpp` 里已有启用深度测试与每帧清除深度缓冲。
 
@@ -21,6 +21,9 @@
 | Depth buffer / Z-buffer | **深度缓冲** | 每个像素存一个「有多远」的值，通常 24 位 float |
 | Depth testing | **深度测试** | 新片段的深度 vs 缓冲里的深度，决定留谁 |
 | Depth value | **深度值** | 片段在屏幕空间里的 z，一般在 \[0, 1\] |
+| Nonlinear depth | **非线性深度** | 投影后写入缓冲的弯曲线编码；近密远疏 |
+| Linear / eye / view depth | **线性深度（观察 z）** | 线性化后 ≈ 相机正前方多远（view-space \(\lvert z\rvert\)） |
+| Euclidean distance | **欧氏距离** | \(\sqrt{x^2+y^2+z^2}\)，相机到片元的斜线长度 |
 | Depth function | **深度函数** | 比较规则，如 `GL_LESS` |
 | Depth mask | **深度掩码** | 是否允许写入深度缓冲 |
 | Early depth test / Early-Z | **提前深度测试** | 尽量在片段着色器**之前**做深度测试，省 FS |
@@ -157,7 +160,50 @@ glDepthFunc(GL_ALWAYS);
 
 ## 5. 深度值从哪来？为什么不是线性的？
 
-### 5.1 缓冲里是 \[0, 1\]
+### 5.1 先记住一句话（核心理解）
+
+深度缓冲里存的，**通常不是**「摄像机到片元的欧氏距离」，也**不是**用简单直线比例算出来的距离。
+
+它是透视投影之后的 **非线性深度**（可以想成一条**曲线**：近处变化快，远处被挤在一起）。
+
+目的：**把有限的精度（如 24 位）多分配给近处**，让近处「谁挡谁」判得更准。  
+这里的「更准确」主要指 **遮挡判断更准**，不是说它更像一把精确的米尺。
+
+若要当「前方距离」用，才做线性化（本工程 `depthTest.fs` 里的 `LinearizeDepth`，Unity 里类似 `LinearEyeDepth`）。
+
+### 5.2 三种「远近」不要混
+
+相机在观察空间原点、朝前方看时，同一个片元 \(P=(x,y,z)\) 可以谈三种量：
+
+```
+              片元 P（屏幕边缘）
+             /
+            /  ← 欧氏距离：sqrt(x²+y²+z²)，斜线长度
+           /
+相机 C ----+----→ 正前方
+           |
+           |  ← view-space |z|：只沿「正前方」量到的深度
+           v
+```
+
+| 名字 | 含义 | 典型来源 |
+|------|------|----------|
+| **非线性深度** | 缓冲 / `gl_FragCoord.z`，\[0,1\]，弯的 | 硬件深度测试用的值 |
+| **线性深度（view z）** | ≈ 眼睛**正前方**多远 | `LinearizeDepth(gl_FragCoord.z)` |
+| **欧氏距离** | 到片元的真实斜线长 | `length(相机 - 片元)`，要自己算 |
+
+只要片元不在正中央（有 \(x\) 或 \(y\)）：
+
+\[
+\sqrt{x^2+y^2+z^2} \;\;>\;\; |z|
+\]
+
+所以：**线性化之后 ≈ view-space z，一般仍不是 \(\sqrt{x^2+y^2+z^2}\)**。  
+屏幕正中间的像素两者几乎一样；靠边才明显。
+
+生活类比：站在房间中间看墙——「到墙的前后距离」和「到墙角的斜线距离」不是一回事。深度缓冲主要管前后遮挡，用 view z / 投影深度就够了。
+
+### 5.3 缓冲里是 \[0, 1\]
 
 深度缓冲存的是 **0～1** 之间的值。观察空间里物体的 z 在 near～far 之间，投影时会被变到这个范围。
 
@@ -167,9 +213,9 @@ glDepthFunc(GL_ALWAYS);
 depth = \frac{z - near}{far - near}
 \]
 
-近处 → 接近 0，远处 → 接近 1。
+近处 → 接近 0，远处 → 接近 1。这是「直线比例」；真实管线**不这么写进缓冲**。
 
-### 5.2 透视投影用的是非线性（∝ 1/z）
+### 5.4 透视投影用的是非线性（∝ 1/z）——就是那条「曲线」
 
 真正嵌入投影矩阵的，是和 **1/z** 成正比的非线性映射。效果是：
 
@@ -178,14 +224,25 @@ depth = \frac{z - near}{far - near}
 
 这很合理：你更在乎眼前模型谁挡谁，不需要对 1000 米外的两面墙用同样精度。
 
+管线直觉：
+
+```
+观察空间 z（线性，前方距离）
+        ↓ 透视投影（弯一下）
+NDC / 屏幕空间深度
+        ↓ 映射到 [0, 1]
+写入深度缓冲 ← gl_FragCoord.z
+```
+
 后果：
 
 - 深度缓冲里的 `0.5` **不等于**「场景深度正好一半」
 - 绝大多数远处片段的 `gl_FragCoord.z` 会挤在接近 `1.0` 的区域
+- 直接把 `gl_FragCoord.z` 当颜色画，场景常常一片白；凑近才渐渐变暗——正好说明「曲线把精度堆在近处」
 
-### 5.3 可视化深度（着色器演示）
+### 5.5 可视化深度（着色器演示）
 
-直接输出深度：
+直接输出非线性深度：
 
 ```glsl
 #version 330 core
@@ -198,29 +255,24 @@ void main()
 }
 ```
 
-线性化后再除以 `far` 方便看（near/far 要和投影一致）：
+线性化后再映射成灰度（near/far 要和投影一致）。本工程正式用法在 `shaders/depthTest.fs`：
 
 ```glsl
-#version 330 core
-out vec4 FragColor;
-
-float near = 0.1;
-float far  = 100.0;
-
 float LinearizeDepth(float depth)
 {
     float z = depth * 2.0 - 1.0; // 回到 NDC
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
-void main()
-{
-    float d = LinearizeDepth(gl_FragCoord.z) / far;
-    FragColor = vec4(vec3(d), 1.0);
-}
+// linearDepth ≈ 观察空间前方距离（view z）
+// 再除以 visualizationRange 只是为了显示好看，不改变真实深度测试
+float gray = clamp(LinearizeDepth(gl_FragCoord.z) / visualizationRange, 0.0, 1.0);
+FragColor = vec4(vec3(gray), 1.0);
 ```
 
-可在临时 fragment shader 里替换输出，或写一份 `depthVis.fs` 做实验；本工程现有 `model.fs` 仍是正常着色。
+`main.cpp` 里用 `DEPTH_VISUALIZATION_ENABLED` 固定走深度可视化路径；`CAMERA_NEAR_PLANE` / `CAMERA_FAR_PLANE` 必须与 `glm::perspective` 一致。
+
+> Unity 对照：`_CameraDepthTexture` 采到的多半是非线性深度；`LinearEyeDepth` ≈ 这里的 `LinearizeDepth`（前方距离），一般仍不是欧氏斜线距离。
 
 ---
 
@@ -340,7 +392,7 @@ Pre-Z 不是硬件开关，而是多画一遍的**成本换收益**：
 1. **注释掉** `glEnable(GL_DEPTH_TEST)`：观察模型是否前后错乱。  
 2. **只** `glClear(GL_COLOR_BUFFER_BIT)`：不清深度，拖动相机看残影/错乱。  
 3. 临时 `glDepthFunc(GL_ALWAYS)`：后画覆盖先画。  
-4. 用第 5 节的 shader 输出 `gl_FragCoord.z`，再对比线性化版本。  
+4. 对比直接输出 `gl_FragCoord.z` 与本工程 `depthTest.fs` 的线性化灰度，体会「曲线」和「前方距离」。  
 5. 把两个物体叠到几乎同一深度，观察 Z-fighting，再给其中一个加一点点位移。
 
 ---
@@ -351,18 +403,20 @@ Pre-Z 不是硬件开关，而是多画一遍的**成本换收益**：
 |------|------|
 | `main.cpp` 初始化 | `glEnable(GL_DEPTH_TEST)` |
 | `main.cpp` 主循环 | `glClear(GL_COLOR_BUFFER_BIT \| GL_DEPTH_BUFFER_BIT)` |
-| 投影 | `glm::perspective(..., near=0.1, far=100)` —— 与线性化示例中的 near/far 一致时，可视化才对得上 |
-| 尚未做 | 显式 `glDepthFunc`、深度可视化 shader、Z-prepass |
+| `main.cpp` 投影 | `CAMERA_NEAR_PLANE` / `CAMERA_FAR_PLANE` 与 `glm::perspective` 一致 |
+| `shaders/depthTest.vs` / `.fs` | 线性化 `gl_FragCoord.z` 并灰度显示（近黑远白） |
+| `DEPTH_VISUALIZATION_ENABLED` | 当前固定走深度可视化；正常光照分支仍保留对照 |
 
 ---
 
 ## 10. 小练习
 
 1. 深度缓冲和颜色缓冲分别存什么？少清哪一个会出现什么现象？  
-2. 为什么透视投影下，直接显示 `gl_FragCoord.z` 常常一片白？  
-3. Early-Z 和 Pre-Z 谁是「硬件尽量做的优化」、谁是「你主动多画一遍」？  
-4. 片段着色器里写了 `gl_FragDepth = ...` 后，Early-Z 为什么容易没了？  
-5. 画半透明玻璃时，为什么常 `glDepthMask(GL_FALSE)`？这和「关掉深度测试」一样吗？
+2. 为什么透视投影下，直接显示 `gl_FragCoord.z` 常常一片白？这和「曲线把精度堆在近处」有什么关系？  
+3. 线性化后的深度 ≈ view z，为什么一般还不是 \(\sqrt{x^2+y^2+z^2}\)？什么时候两者几乎相等？  
+4. Early-Z 和 Pre-Z 谁是「硬件尽量做的优化」、谁是「你主动多画一遍」？  
+5. 片段着色器里写了 `gl_FragDepth = ...` 后，Early-Z 为什么容易没了？  
+6. 画半透明玻璃时，为什么常 `glDepthMask(GL_FALSE)`？这和「关掉深度测试」一样吗？
 
 ---
 
@@ -373,7 +427,9 @@ Part1 坐标系统（已用深度缓冲防穿帮）
   ↓
 Part4 Day01 深度测试（本文）← 原理 + Early-Z/Pre-Z
   ↓
-模板测试 → 混合 → 面剔除 → 帧缓冲 …
+Part4 Day02 模板测试 ← 像素标签 + 物体轮廓
+  ↓
+混合 → 面剔除 → 帧缓冲 …
 ```
 
 ---
