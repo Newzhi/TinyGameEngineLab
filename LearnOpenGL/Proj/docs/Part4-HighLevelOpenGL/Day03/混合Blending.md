@@ -7,7 +7,7 @@
 | [Day01 深度测试](../Day01/深度测试DepthTesting.md) | 远近谁赢 |
 | [Day02 模板测试](../Day02/模板测试StencilTesting.md) | 像素标签 / 遮罩 |
 | **本文档** | alpha、`discard`、混合方程、`glBlendFunc`、透明物体排序 |
-| 后续 | 面剔除、帧缓冲…… |
+| [Day04 面剔除](../Day04/面剔除FaceCulling.md) | 环绕顺序、正/背面、为何片元不出现 |
 
 **工程对照**：当前 `main.cpp` 为混合 Demo——不透明地板/箱子 + 草（丢弃）+ 半透明窗户（混合并按距离排序）。资源：
 
@@ -287,7 +287,7 @@ Day02 模板测试
   ↓
 Day03 混合（本文）← discard + BlendFunc + 排序
   ↓
-面剔除 Face Culling → 帧缓冲 Framebuffers …
+Day04 面剔除 Face Culling → 帧缓冲 Framebuffers …
 ```
 
 ---
