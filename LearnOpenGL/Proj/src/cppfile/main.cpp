@@ -7,6 +7,7 @@
 #include "../headfile/Camera.h"
 
 #include <stb_image.h>
+
 #include <iostream>
 
 #include <glm/glm.hpp>
@@ -16,7 +17,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
-void applyCullMode();
 unsigned int loadTexture(const char* path);
 
 const unsigned int SCR_WIDTH = 800;
@@ -31,90 +31,58 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 演示用：当前剔除策略（由数字键切换）
-enum class CullMode
-{
-    Off = 0,     // 1：关剔除 —— 正反面都画，片元都会进 FS
-    CullBack,    // 2：剔背面（默认）—— 屏幕上呈顺时针的三角丢掉
-    CullFront    // 3：剔正面 —— 外面看不见，飞进去能看到「内壁」
-};
-
-// 教学 Demo 默认剔除正面：启动后直接拿掉靠近相机的外壳，
-// 因而能看到立方体后方保留下来的背面；按 2 可切回常规的背面剔除。
-CullMode g_cullMode = CullMode::CullFront;
-
+// 后处理模式：对应 framebufferScreen.fs 的 uEffect
+int g_effect = 0; // 0 原图 / 1 反相 / 2 灰度 / 3 锐化
 bool g_key1WasDown = false;
 bool g_key2WasDown = false;
 bool g_key3WasDown = false;
+bool g_key4WasDown = false;
 
 // ---------------------------------------------------------------------------
-// Part4 Day04：面剔除 Face Culling
+// Part4 Day05：帧缓冲 Framebuffers + 后处理
 //
-// 核心问题：
-//   1) OpenGL 怎么知道一个三角形朝向相机还是背对相机？
-//      → 不看法线，而看「投影到屏幕后三个顶点是逆时针还是顺时针」
-//   2) 为什么有的面「片元不显示」？
-//      → 被判定为要剔除的那一类面：整三角在光栅化后丢弃，FS 基本不跑，
-//         也不写颜色/深度 —— 不是画了透明，是根本没留下来
+// 流程：
+//   1) 创建 FBO，挂颜色纹理 + 深度模板 RBO
+//   2) Pass1：场景画到 FBO（离屏）→ 结果写进颜色纹理
+//   3) Pass2：绑回默认 FBO(0)，全屏四边形采样该纹理，片元着色器做滤镜
 //
-// Demo：只画一个闭合立方体，每个面从外侧看都是 CCW。
-//   CullBack ：丢掉背向相机的面，只看到立方体外壳（正常效果）
-//   CullFront：丢掉朝向相机的面，前壳被拿走，于是能看到后面的内侧
-//   Off      ：正反面都参与光栅化；深度测试仍会让近处外壳挡住后面
+// 改后处理 = 只改 Pass2 的片元着色器 / uEffect，不必动场景几何。
 // ---------------------------------------------------------------------------
 
-void applyCullMode()
+unsigned int loadTexture(const char* path)
 {
-    if (g_cullMode == CullMode::Off)
+    unsigned int textureID = 0;
+    glGenTextures(1, &textureID);
+
+    int width = 0, height = 0, nrComponents = 0;
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char* data = stbi_load(path, &width, &height, &nrComponents, 0);
+    if (data)
     {
-        glDisable(GL_CULL_FACE);
+        GLenum format = GL_RGB;
+        if (nrComponents == 1)
+            format = GL_RED;
+        else if (nrComponents == 3)
+            format = GL_RGB;
+        else if (nrComponents == 4)
+            format = GL_RGBA;
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(format), width, height, 0,
+                     format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        stbi_image_free(data);
     }
     else
     {
-        glEnable(GL_CULL_FACE);
-        glCullFace(g_cullMode == CullMode::CullBack ? GL_BACK : GL_FRONT);
-    }
-
-    // 官网默认约定：投影到屏幕后，逆时针（CCW）环绕的三角形是正面。
-    // 本 Demo 的立方体数据严格按这个约定书写，不再切换 CW，避免混淆。
-    glFrontFace(GL_CCW);
-
-    const char* cullStr =
-        (g_cullMode == CullMode::Off) ? "OFF" :
-        (g_cullMode == CullMode::CullBack) ? "CULL BACK" : "CULL FRONT";
-    std::cout << "[FaceCull] " << cullStr << " | front face = CCW" << std::endl;
-}
-
-// 本章只需要一个最小纹理加载器。
-// 图片负责让面的方向更容易辨认；面剔除仍只由顶点环绕顺序决定，与纹理无关。
-unsigned int loadTexture(const char* path)
-{
-    unsigned int texture = 0;
-    glGenTextures(1, &texture);
-
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    stbi_set_flip_vertically_on_load(false);
-    unsigned char* data = stbi_load(path, &width, &height, &channels, 0);
-    if (data == nullptr)
-    {
         std::cout << "Failed to load texture: " << path << std::endl;
-        return texture;
+        stbi_image_free(data);
     }
-
-    GLenum format = channels == 4 ? GL_RGBA : GL_RGB;
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(format),
-                 width, height, 0, format, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    stbi_image_free(data);
-
-    return texture;
+    return textureID;
 }
 
 int main()
@@ -129,7 +97,7 @@ int main()
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Face Culling", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Framebuffers", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -149,75 +117,78 @@ int main()
     }
 
     glEnable(GL_DEPTH_TEST);
-    applyCullMode();
 
-    Camera camera(glm::vec3(0.0f, 0.0f, 4.0f));
+    Camera camera(glm::vec3(0.0f, 1.0f, 3.0f));
     g_camera = &camera;
 
-    Shader shader("shaders/faceCull.vs", "shaders/faceCull.fs");
+    Shader shader("shaders/framebuffer.vs", "shaders/framebuffer.fs");
+    Shader screenShader("shaders/framebufferScreen.vs", "shaders/framebufferScreen.fs");
 
-    // ========================================================================
-    // 单个 CCW 立方体（参考官网：从每个面的外侧看，顶点都是逆时针）
-    // ------------------------------------------------------------------------
-    // 每个面的 2 个三角形，都按「站在该面外侧朝里看」写成逆时针。
-    //
-    // 默认 glFrontFace(GL_CCW)：
-    //   - 从相机看到的外侧面 → 屏幕上仍是 CCW → 判为 FRONT → 保留
-    //   - 背对相机的那一侧 → 屏幕上变成 CW → 判为 BACK → 被 glCullFace(BACK) 丢掉
-    //
-    // 所以：外面能看见最多 3 个面；飞进内部后，原来的内壁相对你变成 BACK → 全没了
-    // ========================================================================
-    float cubeCCW[] = {
-        // 位置                    // UV
-        // 每个面从「立方体外侧」看都是 CCW；UV 只用于显示同一张纹理。
+    // ---------- 场景几何：箱子 + 地板 ----------
+    float cubeVertices[] = {
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
 
-        // 前面 +Z
-        -0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,     1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,     0.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
 
-        // 后面 -Z：站在 -Z 外侧看仍为 CCW
-         0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,     0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
 
-        // 左面 -X
-        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,     1.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,     0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
 
-        // 右面 +X
-         0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,     0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
 
-        // 下面 -Y
-        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
+    };
 
-        // 上面 +Y
-        -0.5f,  0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,     1.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,     0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,     0.0f, 0.0f
+    float planeVertices[] = {
+         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
+        -5.0f, -0.5f,  5.0f,  0.0f, 0.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
+
+         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
+         5.0f, -0.5f, -5.0f,  2.0f, 2.0f
+    };
+
+    // 全屏四边形：位置已是 NDC，覆盖整个屏幕
+    float quadVertices[] = {
+        // positions   // texCoords
+        -1.0f,  1.0f,  0.0f, 1.0f,
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+
+        -1.0f,  1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f
     };
 
     unsigned int cubeVAO = 0, cubeVBO = 0;
@@ -225,22 +196,79 @@ int main()
     glGenBuffers(1, &cubeVBO);
     glBindVertexArray(cubeVAO);
     glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeCCW), cubeCCW, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
 
+    unsigned int planeVAO = 0, planeVBO = 0;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+
+    unsigned int quadVAO = 0, quadVBO = 0;
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
 
-    unsigned int cubeTexture = loadTexture("Resource/Texture/container2.png");
+    unsigned int cubeTexture  = loadTexture("Resource/Texture/container2.png");
+    unsigned int floorTexture = loadTexture("Resource/Texture/container.jpg");
+
+    // ========================================================================
+    // 创建帧缓冲：颜色纹理（可采样）+ 深度模板 RBO（只测试）
+    // ========================================================================
+    unsigned int framebuffer = 0;
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+
+    // 颜色附件：空纹理，尺寸=窗口；Pass1 的渲染结果写到这里
+    unsigned int textureColorbuffer = 0;
+    glGenTextures(1, &textureColorbuffer);
+    glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
+                 static_cast<GLsizei>(SCR_WIDTH), static_cast<GLsizei>(SCR_HEIGHT),
+                 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, textureColorbuffer, 0);
+
+    // 深度+模板：RBO，不采样，只给 Pass1 做深度测试用
+    unsigned int rbo = 0;
+    glGenRenderbuffers(1, &rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+                          static_cast<GLsizei>(SCR_WIDTH), static_cast<GLsizei>(SCR_HEIGHT));
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                             GL_RENDERBUFFER, rbo);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     shader.use();
     shader.setInt("texture1", 0);
+    screenShader.use();
+    screenShader.setInt("screenTexture", 0);
 
-    std::cout << "Face Culling Demo\n"
-              << "  1=cull OFF  2=cull BACK  3=cull FRONT\n"
-              << "  Cull BACK : see the normal outer cube\n"
-              << "  Cull FRONT: front shell disappears; see back/inside faces\n"
+    std::cout << "Framebuffer Demo\n"
+              << "  Pass1: scene -> FBO color texture\n"
+              << "  Pass2: fullscreen quad samples texture + post-process\n"
+              << "  1=normal  2=invert  3=grayscale  4=sharpen\n"
               << "  WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
@@ -251,7 +279,15 @@ int main()
 
         processInput(window);
 
-        glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
+        // ================================================================
+        // Pass 1：场景 → 自定义 FBO（离屏）
+        // ================================================================
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        // FBO 颜色附件固定为 800×600，所以这个 Pass 的 viewport 必须与附件一致。
+        // viewport 决定 NDC 映射到渲染目标的哪一块像素区域。
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        glEnable(GL_DEPTH_TEST);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = camera.GetViewMatrix();
@@ -263,21 +299,50 @@ int main()
         shader.setMat4("view", view);
         shader.setMat4("projection", projection);
 
-        // 只画一个立方体：
-        // - 按 2：正面保留、背面在光栅化前被丢掉 → 正常实心外观
-        // - 按 3：正面被丢掉 → 近处外壳不产生片元，也不写深度；
-        //         后方原本朝外的面，从当前相机看属于背面，因此被保留并显示
+        // 两个箱子
+        glBindVertexArray(cubeVAO);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, cubeTexture);
         {
             glm::mat4 model(1.0f);
-            // 稍微旋转，启动时同时看见前、右、上三个面，朝向变化更直观。
-            model = glm::rotate(model, glm::radians(22.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(-30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::translate(model, glm::vec3(-1.0f, 0.0f, -1.0f));
             shader.setMat4("model", model);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, cubeTexture);
-            glBindVertexArray(cubeVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+
+            model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(2.0f, 0.0f, 0.0f));
+            shader.setMat4("model", model);
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
+
+        // 地板
+        glBindVertexArray(planeVAO);
+        glBindTexture(GL_TEXTURE_2D, floorTexture);
+        {
+            glm::mat4 model(1.0f);
+            shader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        // ================================================================
+        // Pass 2：颜色纹理 → 默认帧缓冲（窗口）+ 后处理
+        // ================================================================
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        // 切回窗口时也切回窗口实际尺寸，否则 resize 后画面只覆盖部分窗口。
+        glViewport(0, 0,
+                   static_cast<GLsizei>(g_ScreenWidth),
+                   static_cast<GLsizei>(g_ScreenHeight));
+        glDisable(GL_DEPTH_TEST); // 全屏四边形不需要深度
+        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        screenShader.use();
+        // 数字键只修改这个整数。全屏 FS 根据它选择直通、反相、灰度或锐化，
+        // 因此 Pass1 的场景完全不需要重新组织，也无需创建四套 FBO。
+        screenShader.setInt("uEffect", g_effect);
+        glBindVertexArray(quadVAO);
+        glBindTexture(GL_TEXTURE_2D, textureColorbuffer); // 采样 Pass1 的结果
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -285,8 +350,16 @@ int main()
 
     g_camera = nullptr;
     glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteVertexArrays(1, &quadVAO);
     glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteBuffers(1, &quadVBO);
     glDeleteTextures(1, &cubeTexture);
+    glDeleteTextures(1, &floorTexture);
+    glDeleteTextures(1, &textureColorbuffer);
+    glDeleteRenderbuffers(1, &rbo);
+    glDeleteFramebuffers(1, &framebuffer);
     glfwTerminate();
     return 0;
 }
@@ -296,7 +369,8 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // 数字键边沿触发，避免按住连刷日志
+    // 边沿触发：只在「刚刚按下」的那一帧返回 true。
+    // 如果直接判断 GLFW_PRESS，按住按键时每帧都会重复切换并刷控制台。
     auto edge = [](GLFWwindow* w, int key, bool& wasDown) -> bool {
         bool down = glfwGetKey(w, key) == GLFW_PRESS;
         bool fired = down && !wasDown;
@@ -306,19 +380,25 @@ void processInput(GLFWwindow* window)
 
     if (edge(window, GLFW_KEY_1, g_key1WasDown))
     {
-        g_cullMode = CullMode::Off;
-        applyCullMode();
+        g_effect = 0;
+        std::cout << "[Post] normal\n";
     }
     if (edge(window, GLFW_KEY_2, g_key2WasDown))
     {
-        g_cullMode = CullMode::CullBack;
-        applyCullMode();
+        g_effect = 1;
+        std::cout << "[Post] invert\n";
     }
     if (edge(window, GLFW_KEY_3, g_key3WasDown))
     {
-        g_cullMode = CullMode::CullFront;
-        applyCullMode();
+        g_effect = 2;
+        std::cout << "[Post] grayscale\n";
     }
+    if (edge(window, GLFW_KEY_4, g_key4WasDown))
+    {
+        g_effect = 3;
+        std::cout << "[Post] sharpen kernel\n";
+    }
+
     if (g_camera == nullptr)
         return;
 

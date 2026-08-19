@@ -8,7 +8,7 @@
 | [Day02 模板测试](../Day02/模板测试StencilTesting.md) | 像素标签 |
 | [Day03 混合](../Day03/混合Blending.md) | 半透明叠加 |
 | **本文档** | 环绕顺序、正/背面、`glCullFace` / `glFrontFace`、为何片元不出现 |
-| 后续 | 帧缓冲 Framebuffers…… |
+| 后续 | [Day05 帧缓冲](../Day05/帧缓冲Framebuffers.md) |
 
 **工程对照**：当前 `main.cpp` 按官网思路只画一个闭合立方体；所有外表面均按 CCW 定义。按键切换「不剔除 / 剔背面 / 剔正面」，直接观察外壳与背面。
 
@@ -184,7 +184,7 @@ Day03 混合
   ↓
 Day04 面剔除（本文）← 环绕顺序 + CullFace
   ↓
-帧缓冲 Framebuffers …
+Day05 帧缓冲 Framebuffers …
 ```
 
 ---
