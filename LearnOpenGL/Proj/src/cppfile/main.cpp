@@ -9,6 +9,8 @@
 #include <stb_image.h>
 
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -18,6 +20,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
 unsigned int loadTexture(const char* path);
+unsigned int loadCubemap(const std::vector<std::string>& faces);
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
@@ -31,22 +34,23 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 后处理模式：对应 framebufferScreen.fs 的 uEffect
-int g_effect = 0; // 0 原图 / 1 反相 / 2 灰度 / 3 锐化
+// 箱子着色：0 贴图 / 1 反射天空 / 2 折射玻璃
+// 默认反射：启动就能看到箱子表面映射天空盒（环境映射）
+int g_objectMode = 1;
 bool g_key1WasDown = false;
 bool g_key2WasDown = false;
 bool g_key3WasDown = false;
-bool g_key4WasDown = false;
 
 // ---------------------------------------------------------------------------
-// Part4 Day05：帧缓冲 Framebuffers + 后处理
+// Part4 Day06：立方体贴图 Cubemaps —— 对照官网天空盒 + 环境映射
 //
 // 流程：
-//   1) 创建 FBO，挂颜色纹理 + 深度模板 RBO
-//   2) Pass1：场景画到 FBO（离屏）→ 结果写进颜色纹理
-//   3) Pass2：绑回默认 FBO(0)，全屏四边形采样该纹理，片元着色器做滤镜
-//
-// 改后处理 = 只改 Pass2 的片元着色器 / uEffect，不必动场景几何。
+//   1) 用 6 张 jpg 组一张 GL_TEXTURE_CUBE_MAP（方向向量采样）
+//   2) 先画场景（地板 + 两个箱子），正常深度测试
+//   3) 后画天空盒：view 去掉平移；shader 里 gl_Position = pos.xyww
+//      让天空深度恒为 1.0；DepthFunc 改为 GL_LEQUAL
+//   4) 箱子默认用反射方向采样同一张天空 cubemap（环境映射）
+//      数字键可切回普通贴图或折射
 // ---------------------------------------------------------------------------
 
 unsigned int loadTexture(const char* path)
@@ -85,6 +89,46 @@ unsigned int loadTexture(const char* path)
     return textureID;
 }
 
+// 顺序必须与 GL_TEXTURE_CUBE_MAP_POSITIVE_X + i 一致：右、左、上、下、后、前
+unsigned int loadCubemap(const std::vector<std::string>& faces)
+{
+    unsigned int textureID = 0;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
+
+    // 天空盒六面不要垂直翻转：和官网 jpg 配套；且与 2D 贴图的 flip=true 分开
+    stbi_set_flip_vertically_on_load(false);
+
+    int width = 0, height = 0, nrChannels = 0;
+    for (unsigned int i = 0; i < faces.size(); ++i)
+    {
+        unsigned char* data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
+        if (data)
+        {
+            GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i,
+                         0, static_cast<GLint>(format), width, height, 0,
+                         format, GL_UNSIGNED_BYTE, data);
+            stbi_image_free(data);
+            std::cout << "Loaded cubemap face: " << faces[i]
+                      << " (" << width << "x" << height << ")\n";
+        }
+        else
+        {
+            std::cout << "Cubemap texture failed to load at path: " << faces[i] << std::endl;
+            stbi_image_free(data);
+        }
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // R 是第三维；面交界处钳制到边缘，避免出现缝
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    return textureID;
+}
+
 int main()
 {
     glfwInit();
@@ -97,7 +141,7 @@ int main()
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Framebuffers", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Cubemaps / Skybox", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -117,78 +161,116 @@ int main()
     }
 
     glEnable(GL_DEPTH_TEST);
+    // 官网天空盒示例默认不开面剔除。
+    // 若开启 GL_CULL_FACE + GL_BACK：相机在盒子内部时，外侧 CCW 面看起来是 CW，会被整盒剔掉。
+    // 若一定要开剔除，画天空盒时改成 glCullFace(GL_FRONT)。
 
-    Camera camera(glm::vec3(0.0f, 1.0f, 3.0f));
+    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    Shader shader("shaders/framebuffer.vs", "shaders/framebuffer.fs");
-    Shader screenShader("shaders/framebufferScreen.vs", "shaders/framebufferScreen.fs");
+    Shader shader("shaders/cubemapObject.vs", "shaders/cubemapObject.fs");
+    Shader skyboxShader("shaders/skybox.vs", "shaders/skybox.fs");
 
-    // ---------- 场景几何：箱子 + 地板 ----------
+    // 箱子：位置 + 法线 + UV（反射 / 折射需要世界空间法线）
     float cubeVertices[] = {
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
-
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
+        // positions          // normals           // uv
+        // 后面 -Z
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+        // 前面 +Z
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
+        // 左面 -X
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+        // 右面 +X
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+        // 底面 -Y
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+        // 顶面 +Y
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f
     };
 
     float planeVertices[] = {
-         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
-        -5.0f, -0.5f,  5.0f,  0.0f, 0.0f,
-        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
+         5.0f, -0.5f,  5.0f,  0.0f, 1.0f, 0.0f,  2.0f, 0.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 1.0f, 0.0f,  0.0f, 2.0f,
+        -5.0f, -0.5f,  5.0f,  0.0f, 1.0f, 0.0f,  0.0f, 0.0f,
 
-         5.0f, -0.5f,  5.0f,  2.0f, 0.0f,
-        -5.0f, -0.5f, -5.0f,  0.0f, 2.0f,
-         5.0f, -0.5f, -5.0f,  2.0f, 2.0f
+         5.0f, -0.5f,  5.0f,  0.0f, 1.0f, 0.0f,  2.0f, 0.0f,
+         5.0f, -0.5f, -5.0f,  0.0f, 1.0f, 0.0f,  2.0f, 2.0f,
+        -5.0f, -0.5f, -5.0f,  0.0f, 1.0f, 0.0f,  0.0f, 2.0f
     };
 
-    // 全屏四边形：位置已是 NDC，覆盖整个屏幕
-    float quadVertices[] = {
-        // positions   // texCoords
-        -1.0f,  1.0f,  0.0f, 1.0f,
-        -1.0f, -1.0f,  0.0f, 0.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
+    // 天空盒立方体：只要位置。官网顶点；中心在原点，边长 2
+    float skyboxVertices[] = {
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
 
-        -1.0f,  1.0f,  0.0f, 1.0f,
-         1.0f, -1.0f,  1.0f, 0.0f,
-         1.0f,  1.0f,  1.0f, 1.0f
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+        -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f
     };
 
     unsigned int cubeVAO = 0, cubeVBO = 0;
@@ -198,9 +280,11 @@ int main()
     glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
 
     unsigned int planeVAO = 0, planeVBO = 0;
     glGenVertexArrays(1, &planeVAO);
@@ -209,66 +293,46 @@ int main()
     glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
 
-    unsigned int quadVAO = 0, quadVBO = 0;
-    glGenVertexArrays(1, &quadVAO);
-    glGenBuffers(1, &quadVBO);
-    glBindVertexArray(quadVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    unsigned int skyboxVAO = 0, skyboxVBO = 0;
+    glGenVertexArrays(1, &skyboxVAO);
+    glGenBuffers(1, &skyboxVBO);
+    glBindVertexArray(skyboxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, skyboxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), skyboxVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glBindVertexArray(0);
 
     unsigned int cubeTexture  = loadTexture("Resource/Texture/container2.png");
     unsigned int floorTexture = loadTexture("Resource/Texture/container.jpg");
 
-    // ========================================================================
-    // 创建帧缓冲：颜色纹理（可采样）+ 深度模板 RBO（只测试）
-    // ========================================================================
-    unsigned int framebuffer = 0;
-    glGenFramebuffers(1, &framebuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-
-    // 颜色附件：空纹理，尺寸=窗口；Pass1 的渲染结果写到这里
-    unsigned int textureColorbuffer = 0;
-    glGenTextures(1, &textureColorbuffer);
-    glBindTexture(GL_TEXTURE_2D, textureColorbuffer);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                 static_cast<GLsizei>(SCR_WIDTH), static_cast<GLsizei>(SCR_HEIGHT),
-                 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D, textureColorbuffer, 0);
-
-    // 深度+模板：RBO，不采样，只给 Pass1 做深度测试用
-    unsigned int rbo = 0;
-    glGenRenderbuffers(1, &rbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
-                          static_cast<GLsizei>(SCR_WIDTH), static_cast<GLsizei>(SCR_HEIGHT));
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                             GL_RENDERBUFFER, rbo);
-
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        std::cout << "ERROR::FRAMEBUFFER:: Framebuffer is not complete!" << std::endl;
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    std::vector<std::string> faces = {
+        "Resource/Texture/skybox/right.jpg",
+        "Resource/Texture/skybox/left.jpg",
+        "Resource/Texture/skybox/top.jpg",
+        "Resource/Texture/skybox/bottom.jpg",
+        "Resource/Texture/skybox/front.jpg",
+        "Resource/Texture/skybox/back.jpg"
+    };
+    unsigned int cubemapTexture = loadCubemap(faces);
 
     shader.use();
     shader.setInt("texture1", 0);
-    screenShader.use();
-    screenShader.setInt("screenTexture", 0);
+    shader.setInt("skybox", 1);
+    skyboxShader.use();
+    skyboxShader.setInt("skybox", 0);
 
-    std::cout << "Framebuffer Demo\n"
-              << "  Pass1: scene -> FBO color texture\n"
-              << "  Pass2: fullscreen quad samples texture + post-process\n"
-              << "  1=normal  2=invert  3=grayscale  4=sharpen\n"
+    std::cout << "Cubemap / Skybox Demo\n"
+              << "  default: cubes reflect the skybox\n"
+              << "  1 = cube diffuse texture\n"
+              << "  2 = cube reflects skybox\n"
+              << "  3 = cube refracts skybox (glass)\n"
               << "  WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
@@ -279,14 +343,6 @@ int main()
 
         processInput(window);
 
-        // ================================================================
-        // Pass 1：场景 → 自定义 FBO（离屏）
-        // ================================================================
-        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        // FBO 颜色附件固定为 800×600，所以这个 Pass 的 viewport 必须与附件一致。
-        // viewport 决定 NDC 映射到渲染目标的哪一块像素区域。
-        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
-        glEnable(GL_DEPTH_TEST);
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -295,14 +351,21 @@ int main()
         glm::mat4 projection = glm::perspective(
             glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
 
+        // ================================================================
+        // 1) 场景：先画，填满深度缓冲（官网优化：天空盒放到最后）
+        // ================================================================
         shader.use();
         shader.setMat4("view", view);
         shader.setMat4("projection", projection);
+        shader.setVec3("cameraPos", camera.Position.x, camera.Position.y, camera.Position.z);
+        shader.setInt("uMode", g_objectMode);
 
-        // 两个箱子
-        glBindVertexArray(cubeVAO);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, cubeTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+
+        glBindVertexArray(cubeVAO);
         {
             glm::mat4 model(1.0f);
             model = glm::translate(model, glm::vec3(-1.0f, 0.0f, -1.0f));
@@ -315,9 +378,11 @@ int main()
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
 
-        // 地板
-        glBindVertexArray(planeVAO);
+        // 地板始终用 2D 贴图（折射箱子时仍能对比地面）
+        shader.setInt("uMode", 0);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, floorTexture);
+        glBindVertexArray(planeVAO);
         {
             glm::mat4 model(1.0f);
             shader.setMat4("model", model);
@@ -325,24 +390,21 @@ int main()
         }
 
         // ================================================================
-        // Pass 2：颜色纹理 → 默认帧缓冲（窗口）+ 后处理
+        // 2) 天空盒：去掉 view 平移；深度当无穷远
         // ================================================================
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        // 切回窗口时也切回窗口实际尺寸，否则 resize 后画面只覆盖部分窗口。
-        glViewport(0, 0,
-                   static_cast<GLsizei>(g_ScreenWidth),
-                   static_cast<GLsizei>(g_ScreenHeight));
-        glDisable(GL_DEPTH_TEST); // 全屏四边形不需要深度
-        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glDepthFunc(GL_LEQUAL);
 
-        screenShader.use();
-        // 数字键只修改这个整数。全屏 FS 根据它选择直通、反相、灰度或锐化，
-        // 因此 Pass1 的场景完全不需要重新组织，也无需创建四套 FBO。
-        screenShader.setInt("uEffect", g_effect);
-        glBindVertexArray(quadVAO);
-        glBindTexture(GL_TEXTURE_2D, textureColorbuffer); // 采样 Pass1 的结果
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        skyboxShader.use();
+        // mat3 丢掉第四列/行里的位移，只保留旋转，天空不会跟着走路平移
+        glm::mat4 skyView = glm::mat4(glm::mat3(view));
+        skyboxShader.setMat4("view", skyView);
+        skyboxShader.setMat4("projection", projection);
+        glBindVertexArray(skyboxVAO);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+
+        glDepthFunc(GL_LESS);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -351,15 +413,13 @@ int main()
     g_camera = nullptr;
     glDeleteVertexArrays(1, &cubeVAO);
     glDeleteVertexArrays(1, &planeVAO);
-    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteVertexArrays(1, &skyboxVAO);
     glDeleteBuffers(1, &cubeVBO);
     glDeleteBuffers(1, &planeVBO);
-    glDeleteBuffers(1, &quadVBO);
+    glDeleteBuffers(1, &skyboxVBO);
     glDeleteTextures(1, &cubeTexture);
     glDeleteTextures(1, &floorTexture);
-    glDeleteTextures(1, &textureColorbuffer);
-    glDeleteRenderbuffers(1, &rbo);
-    glDeleteFramebuffers(1, &framebuffer);
+    glDeleteTextures(1, &cubemapTexture);
     glfwTerminate();
     return 0;
 }
@@ -369,8 +429,6 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // 边沿触发：只在「刚刚按下」的那一帧返回 true。
-    // 如果直接判断 GLFW_PRESS，按住按键时每帧都会重复切换并刷控制台。
     auto edge = [](GLFWwindow* w, int key, bool& wasDown) -> bool {
         bool down = glfwGetKey(w, key) == GLFW_PRESS;
         bool fired = down && !wasDown;
@@ -380,23 +438,18 @@ void processInput(GLFWwindow* window)
 
     if (edge(window, GLFW_KEY_1, g_key1WasDown))
     {
-        g_effect = 0;
-        std::cout << "[Post] normal\n";
+        g_objectMode = 0;
+        std::cout << "[Cube] diffuse texture\n";
     }
     if (edge(window, GLFW_KEY_2, g_key2WasDown))
     {
-        g_effect = 1;
-        std::cout << "[Post] invert\n";
+        g_objectMode = 1;
+        std::cout << "[Cube] reflection\n";
     }
     if (edge(window, GLFW_KEY_3, g_key3WasDown))
     {
-        g_effect = 2;
-        std::cout << "[Post] grayscale\n";
-    }
-    if (edge(window, GLFW_KEY_4, g_key4WasDown))
-    {
-        g_effect = 3;
-        std::cout << "[Post] sharpen kernel\n";
+        g_objectMode = 2;
+        std::cout << "[Cube] refraction (glass)\n";
     }
 
     if (g_camera == nullptr)

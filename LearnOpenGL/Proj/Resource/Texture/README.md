@@ -4,6 +4,7 @@
 
 - `container.jpg` / `container2.png` / `container2_specular.png`
 - `grass.png`、`blending_transparent_window.png`（Part4 Day03 混合）
+- `skybox/`：立方体贴图六面（`right/left/top/bottom/front/back`，Part4 Day06）
 
 程序运行时通过相对路径加载，例如：
 

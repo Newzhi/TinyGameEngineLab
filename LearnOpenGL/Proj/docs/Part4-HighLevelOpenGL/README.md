@@ -9,6 +9,7 @@ LearnOpenGL「[高级 OpenGL](https://learnopengl-cn.github.io/04%20Advanced%20O
 | [Day03](./Day03/) | 混合：alpha、`discard`、混合方程、半透明排序 |
 | [Day04](./Day04/) | 面剔除：环绕顺序、正/背面、`glCullFace` / `glFrontFace` |
 | [Day05](./Day05/) | 帧缓冲：FBO、颜色纹理 / RBO、离屏渲染与后处理 |
+| [Day06](./Day06/) | 立方体贴图：天空盒、方向采样、反射 / 折射 |
 
 建议先完成 Part1（尤其坐标系统 / 深度缓冲入门）与 Part3，再进入本部分。
 
@@ -21,3 +22,4 @@ LearnOpenGL「[高级 OpenGL](https://learnopengl-cn.github.io/04%20Advanced%20O
 | 混合 | [Day03/混合Blending.md](./Day03/混合Blending.md) |
 | 面剔除 | [Day04/面剔除FaceCulling.md](./Day04/面剔除FaceCulling.md) |
 | 帧缓冲 | [Day05/帧缓冲Framebuffers.md](./Day05/帧缓冲Framebuffers.md) |
+| 立方体贴图 | [Day06/立方体贴图Cubemaps.md](./Day06/立方体贴图Cubemaps.md) |
