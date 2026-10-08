@@ -5,10 +5,10 @@
 | 文档 | 内容 |
 |------|------|
 | [Day08 高级 GLSL](../Day08/高级GLSLAdvancedGLSL.md) | 接口块；几何着色器的输入就是这种块组成的数组 |
-| **本文档** | 输入/输出布局、`gl_in`、`EmitVertex` / `EndPrimitive`、房子、爆破、法线可视化 |
+| **本文档** | `layout` 修饰符、直通点 Demo、`gl_in`、房子、爆破、法线可视化 |
 | 后续 | 实例化、抗锯齿 |
 
-**工程对照**：当前 `main.cpp` 仍是 Day08 的四个立方体，没有几何着色器。`Shader` 的构造函数只编译 `GL_VERTEX_SHADER` 和 `GL_FRAGMENT_SHADER`（`src/headfile/Shader.h`）。要接上这一章，需要再 `glCreateShader(GL_GEOMETRY_SHADER)` 并在 `glLinkProgram` 之前 `glAttachShader`。
+**工程对照**：当前 `main.cpp` 是直通几何着色器 Demo。四个 NDC 点经 `geometryPass.gs` 原样发射，窗口四角附近四个绿点。`Shader` 第三参数挂 `GL_GEOMETRY_SHADER`。`layout (points) in` 必须对上 `glDrawArrays(GL_POINTS, …)`。
 
 **前置**：顶点着色器写出 `gl_Position`、图元类型（点 / 线 / 三角形）、Day08 接口块、法线矩阵（观察空间里显示法线时用到）。
 
@@ -58,29 +58,53 @@
 
 ---
 
-## 2. 输入、输出、发射
+## 2. `layout` 是什么
 
-着色器开头两行布局是必写的：
+`layout (...)` 是 GLSL 的**布局修饰符**：写在 `in` / `out` / `uniform` 前面，告诉驱动这块数据按什么规则进出，**不参与计算**。同一关键字在不同阶段含义不同。
 
-```glsl
-#version 330 core
-layout (points) in;
-layout (line_strip, max_vertices = 2) out;
-```
+| 写法 | 出现位置 | 告诉驱动什么 |
+|------|----------|----------------|
+| `layout (location = 0) in vec2 aPos` | 顶点着色器 | 这个属性走 VAO 的 0 号槽，对上 `glVertexAttribPointer(0, …)` |
+| `layout (std140) uniform Matrices { … }` | 任意阶段 | Uniform 块按 std140 对齐，CPU 才能按偏移 `glBufferSubData` |
+| `layout (binding = 0)` | OpenGL 4.2+ | Uniform 块挂到绑定点 0。本工程 3.3 用 `glUniformBlockBinding` |
+| `layout (points) in` | **几何着色器** | 每次调用吃进一个点图元，`gl_in` 长度为 1 |
+| `layout (points, max_vertices = 1) out` | **几何着色器** | 输出仍是点；这次调用最多 `EmitVertex` 1 次 |
 
-输入图元（括号里是这个图元至少有几个顶点）：
+没有几何着色器时，图元类型只由 `glDrawArrays` 的第一个参数决定。有了几何着色器，驱动还要知道：**进来的图元是哪种、出去的图元是哪种**。这两行 `layout` 就是这份说明书。少写任意一行，着色器编译会失败。
 
-| 布局 | 对应的绘制 |
-|------|------------|
-| `points` | `GL_POINTS`（1） |
-| `lines` | `GL_LINES` 或 `GL_LINE_STRIP`（2） |
-| `triangles` | `GL_TRIANGLES` / `STRIP` / `FAN`（3） |
-| `lines_adjacency` | 带邻接的线（4） |
-| `triangles_adjacency` | 带邻接的三角形（6） |
+### 2.1 输入 `layout (… ) in`
+
+必须和 CPU 绘制模式一致。括号里的数字是这个图元至少几个顶点，也是 `gl_in` 的有效长度：
+
+| 布局 | 对应的绘制 | `gl_in` 长度 |
+|------|------------|----------------|
+| `points` | `GL_POINTS` | 1 |
+| `lines` | `GL_LINES` 或 `GL_LINE_STRIP` | 2 |
+| `triangles` | `GL_TRIANGLES` / `STRIP` / `FAN` | 3 |
+| `lines_adjacency` | 带邻接的线 | 4 |
+| `triangles_adjacency` | 带邻接的三角形 | 6 |
+
+Demo 写 `layout (points) in`，所以 `main.cpp` 必须 `glDrawArrays(GL_POINTS, 0, 4)`。改成 `GL_TRIANGLES`，几何着色器收不到图元，四个绿点消失。
+
+### 2.2 输出 `layout (… , max_vertices = N) out`
 
 输出只能是三种：`points`、`line_strip`、`triangle_strip`。想要一个三角形，就输出 `triangle_strip` 并发射 3 个顶点。
 
-上个阶段的位置在内建数组里。它是接口块，所以即便只有一个点，下标也要写 `[0]`：
+`max_vertices` 是**这一次几何着色器调用**最多发射几次。不是整屏顶点上限。直通 Demo 每个点只发 1 个，写成 1。房子例子要发 5 个，写成 5。超出的 `EmitVertex` 会被丢掉，不会报错。
+
+输入和输出可以不同：`points` 进、`line_strip` 出，就是「提交 4 个点，GPU 上变成 4 条线」。VBO 里仍然只有 4 个顶点。
+
+### 2.3 和 `location` 的差别
+
+`layout (location = 0)` 说的是**一个顶点里第几号属性**。  
+几何着色器的 `layout (points) in` 说的是**一次调用吃进哪种图元**。  
+两者都叫 layout，管的层不一样：一个对 VAO 槽位，一个对 `glDraw*` 的图元类型。
+
+---
+
+## 3. 输入数组与发射
+
+上个阶段的位置在内建数组 `gl_in` 里。它是接口块，所以即便只有一个点，下标也要写 `[0]`：
 
 ```glsl
 in gl_PerVertex
@@ -128,7 +152,7 @@ void main()
 
 ---
 
-## 3. 造房子
+## 4. 造房子
 
 教程用四个 NDC 里的点当输入。顶点着色器只把 `vec2` 写成 `gl_Position`，不乘矩阵。几何着色器把每个点展开成 5 个顶点的三角形带：底边两个、顶边两个、再加一个屋顶。5 个顶点得到 `5 - 2 = 3` 个三角形（方盒子两个，屋顶一个）。
 
@@ -203,7 +227,7 @@ EndPrimitive();
 
 ---
 
-## 4. 爆破
+## 5. 爆破
 
 对模型的每个三角形算一个法线，再沿法线把三个顶点推出去。`sin(time)` 从 -1 收到 1，教程把它映射到 `[0, 1]`，所以三角形只会往外走，再回到原位，不会穿进模型里面。
 
@@ -244,7 +268,7 @@ CPU 每帧 `setFloat("time", glfwGetTime())`。
 
 ---
 
-## 5. 法线可视化
+## 6. 法线可视化
 
 画两遍：第一遍正常着色；第二遍换一套带几何着色器的程序，只画法线。
 
@@ -286,24 +310,41 @@ void GenerateLine(int index)
 
 ---
 
-## 6. 和本工程怎么接
+## 7. 和本工程怎么接
 
-| 位置 | 现在 | 和本章的关系 |
-|------|------|----------------|
-| `Shader::Shader(vs, fs)` | 只创建顶点、片元两个阶段 | 几何着色器要第三段：`GL_GEOMETRY_SHADER`，链接前挂上 |
-| `main.cpp` | Day08 四立方体，无几何着色器 | 本章是笔记。房子的输入是 `GL_POINTS`，和立方体的 `GL_TRIANGLES` 不是同一种布局 |
-| `Model.h` / `Mesh.h` | 模型顶点含位置、法线、UV | 爆破、法线可视化可以直接用这套属性。法线可视化的第二遍仍画同一个 VAO |
+### 7.1 Demo 内容（当前 `main.cpp`）
 
-链接顺序：编译三份着色器 → `glAttachShader` 三次 → `glLinkProgram` → 删掉着色器对象。输入布局和 `glDrawArrays` / `glDrawElements` 的模式必须一致，否则几何着色器收不到图元。
+窗口四角附近四个绿点。CPU 提交的是 4 个 `GL_POINTS`，几何着色器按直通再发射一遍。能看见它们，说明第三阶段已经链上。
+
+| 文件 | 作用 |
+|------|------|
+| `shaders/geometryPass.vs` | `layout (location = 0)` 读 `vec2`，写出 NDC 位置，`gl_PointSize = 16` |
+| `shaders/geometryPass.gs` | `layout (points) in` + `layout (points, max_vertices = 1) out`；`EmitVertex` + `EndPrimitive` |
+| `shaders/geometryPass.fs` | 涂成绿色 |
+| `src/headfile/Shader.h` | 三参数构造：`GL_GEOMETRY_SHADER` 在 `glLinkProgram` 之前 attach |
+
+初始化：
+
+1. `glEnable(GL_PROGRAM_POINT_SIZE)`，否则顶点着色器里的点大小不起作用，点只有 1 像素。
+2. `Shader(..., "shaders/geometryPass.gs")` 编译并链接第三阶段。
+3. VBO 里四个 NDC 点，`glVertexAttribPointer(0, 2, …)` 对上 `location = 0`。
+
+每一帧：`glDrawArrays(GL_POINTS, 0, 4)`。这个 `GL_POINTS` 就是在兑现 `layout (points) in`。
+
+把 `geometryPass.gs` 的输出改成 `line_strip, max_vertices = 2`，并左右各偏 0.1 再发射两次，四个点会变成四条短横线。绘制函数仍然是 `GL_POINTS`，多出来的顶点是 GPU 上生成的。
+
+`Model.h` / `Mesh.h` 仍可用于后面的爆破和法线可视化：那些例子的输入布局是 `triangles`。
 
 ---
 
-## 7. 容易踩的坑
+## 8. 容易踩的坑
 
 | 现象 | 原因 |
 |------|------|
-| 画面和没写几何着色器时一样，但也没有报错 | 直通着色器就是这样。确认 `GL_GEOMETRY_SHADER` 已经 attach 并重新链接 |
-| 什么都看不见 | 输入布局和绘制模式不一致，例如着色器写 `points` 却 `glDrawArrays(GL_TRIANGLES, ...)` |
+| 几何着色器编译失败，提示 layout | 少了 `in` 或 `out` 那一行 layout；或 `max_vertices` 没写 |
+| 画面和没写几何着色器时一样，但也没有报错 | 直通着色器就是这样。四个绿点存在，说明已经链上 |
+| 四个点几乎看不见 | 没 `glEnable(GL_PROGRAM_POINT_SIZE)`，或没写 `gl_PointSize` |
+| 什么都看不见 | 输入布局和绘制模式不一致，例如着色器写 `points` 却 `glDrawArrays(GL_TRIANGLES, ...)`；或只 `EmitVertex` 不 `EndPrimitive` |
 | 房子缺屋顶或少一条边 | `EmitVertex` 次数超过 `max_vertices`，多出来的被丢弃 |
 | 房子形状散成别的三角形 | 三角形带的顶点顺序错了。带是重叠的三个顶点一组，不是每三个顶点一个独立三角形 |
 | 颜色整栋房子都是黑的 | 几何着色器里接口块没写成数组，或块名和顶点着色器不一致 |
@@ -314,9 +355,9 @@ void GenerateLine(int index)
 
 ---
 
-## 8. 小练习
+## 9. 小练习
 
-1. `layout (points) in` 时，`gl_in` 里有几个顶点？改成 `triangles` 之后呢？
+1. `layout (points) in` 时，`gl_in` 里有几个顶点？改成 `triangles` 之后呢？`layout (location = 0)` 管的是同一件事吗？
 2. `EmitVertex` 和 `EndPrimitive` 各做一件什么事？只 `EmitVertex` 两次、从不 `EndPrimitive`，线段还会出现吗？
 3. 5 个顶点的三角形带会产生几个三角形？顶点顺序为什么是「左下、右下、左上、右上、屋顶」？
 4. 为什么几何着色器里的 `in VS_OUT { ... } gs_in[]` 必须是数组，即便点图元只有一个顶点？
@@ -325,7 +366,7 @@ void GenerateLine(int index)
 
 ---
 
-## 9. 阅读顺序与下一步
+## 10. 阅读顺序与下一步
 
 ```
 Day08 高级 GLSL（接口块）
@@ -339,9 +380,9 @@ Day09 几何着色器（本文）← 一个图元进，可以多个图元出
 
 ---
 
-## 10. 参考文献
+## 11. 参考文献
 
 1. LearnOpenGL CN — [几何着色器](https://learnopengl-cn.github.io/04%20Advanced%20OpenGL/09%20Geometry%20Shader/)
 2. LearnOpenGL EN — [Geometry Shader](https://learnopengl.com/Advanced-OpenGL/Geometry-Shader)
 3. 《Part4 Day08 — 高级 GLSL》— 接口块；几何着色器的输入是这块的数组
-4. 本工程 `src/headfile/Shader.h` — 目前只链接顶点着色器与片元着色器
+4. 本工程 `src/cppfile/main.cpp`、`shaders/geometryPass.gs` — 直通点；`Shader` 第三参数链接几何着色器
