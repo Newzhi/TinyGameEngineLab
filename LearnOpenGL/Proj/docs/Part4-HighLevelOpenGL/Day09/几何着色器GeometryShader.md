@@ -8,7 +8,7 @@
 | **本文档** | `layout` 修饰符、直通点 Demo、`gl_in`、房子、爆破、法线可视化 |
 | 后续 | 实例化、抗锯齿 |
 
-**工程对照**：当前 `main.cpp` 是直通几何着色器 Demo。四个 NDC 点经 `geometryPass.gs` 原样发射，窗口四角附近四个绿点。`Shader` 第三参数挂 `GL_GEOMETRY_SHADER`。`layout (points) in` 必须对上 `glDrawArrays(GL_POINTS, …)`。
+**工程对照**：当前 `main.cpp` 是立方体几何着色器 Demo。`1` 完整立方体，`2` 六个面沿面法线分开再合上（爆破，默认），`3` 叠加黄色顶点法线。爆破在世界空间做，投影放在几何着色器里乘。
 
 **前置**：顶点着色器写出 `gl_Position`、图元类型（点 / 线 / 三角形）、Day08 接口块、法线矩阵（观察空间里显示法线时用到）。
 
@@ -239,7 +239,10 @@ vec3 GetNormal()
 {
     vec3 a = vec3(gl_in[0].gl_Position) - vec3(gl_in[1].gl_Position);
     vec3 b = vec3(gl_in[2].gl_Position) - vec3(gl_in[1].gl_Position);
-    return normalize(cross(a, b));
+    vec3 n = normalize(cross(a, b));
+    if (dot(n, gs_in[0].normal) < 0.0)
+        n = -n;   // 保证往外推
+    return n;
 }
 
 vec4 explode(vec4 position, vec3 normal)
@@ -264,7 +267,11 @@ EndPrimitive();
 
 CPU 每帧 `setFloat("time", glfwGetTime())`。
 
-这里的法线是用 `gl_Position` 上的三条边叉乘出来的。顶点着色器若已经乘了 `projection * view * model`，叉乘发生在裁剪空间，透视会把方向拉歪。教程用它演示「一个三角形可以整块挪走」。要看法线是否可信，用下一节的可视化，不要用这个叉乘结果当光照法线。
+这里的法线是用 `gl_Position` 上的三条边叉乘出来的。本工程把位置停在**世界空间**再叉乘，投影放在 `EmitVertex` 之前乘，六个面会沿真实朝外的方向分开。顶点着色器若已经乘了 `projection`，叉乘发生在裁剪空间，透视会把方向拉歪。
+
+立方体同一面的两个三角形共面，叉乘法线平行，所以看起来是 **6 个面**在分离，不是 12 个三角形各飞各的。叉乘顺序若和环绕相反，面会往里收：Demo 里用顶点法线做一次点乘，朝里就取反。
+
+CPU 每帧 `setFloat("time", glfwGetTime())`。要看法线是否可信，用下一节的可视化，不要用这个叉乘结果当光照法线。
 
 ---
 
@@ -314,26 +321,30 @@ void GenerateLine(int index)
 
 ### 7.1 Demo 内容（当前 `main.cpp`）
 
-窗口四角附近四个绿点。CPU 提交的是 4 个 `GL_POINTS`，几何着色器按直通再发射一遍。能看见它们，说明第三阶段已经链上。
+一个略微转过的立方体。数字键切换：
 
-| 文件 | 作用 |
-|------|------|
-| `shaders/geometryPass.vs` | `layout (location = 0)` 读 `vec2`，写出 NDC 位置，`gl_PointSize = 16` |
-| `shaders/geometryPass.gs` | `layout (points) in` + `layout (points, max_vertices = 1) out`；`EmitVertex` + `EndPrimitive` |
-| `shaders/geometryPass.fs` | 涂成绿色 |
-| `src/headfile/Shader.h` | 三参数构造：`GL_GEOMETRY_SHADER` 在 `glLinkProgram` 之前 attach |
+| 键 | 画面 | 着色器 |
+|----|------|--------|
+| `1` | 完整立方体，漫反射 | `gsCube.vs` / `gsCube.fs`，无几何着色器 |
+| `2` | 六个面沿面法线推开再合上（默认） | `gsExplode.vs` + `gsExplode.gs` + `gsCube.fs` |
+| `3` | 立方体 + 黄色顶点法线 | 先 `gsCube`，再 `gsNormal.vs` / `.gs` / `.fs` 画第二遍 |
 
-初始化：
+两套几何着色器的输入都是 `layout (triangles) in`，对上 `glDrawArrays(GL_TRIANGLES, 0, 36)`。
 
-1. `glEnable(GL_PROGRAM_POINT_SIZE)`，否则顶点着色器里的点大小不起作用，点只有 1 像素。
-2. `Shader(..., "shaders/geometryPass.gs")` 编译并链接第三阶段。
-3. VBO 里四个 NDC 点，`glVertexAttribPointer(0, 2, …)` 对上 `location = 0`。
+**面分离（模式 2）**
 
-每一帧：`glDrawArrays(GL_POINTS, 0, 4)`。这个 `GL_POINTS` 就是在兑现 `layout (points) in`。
+1. 顶点着色器只乘 `model`，`gl_Position` 停在世界空间，法线经法线矩阵写入接口块。
+2. 几何着色器对每个三角形：三条边叉乘得面法线，和顶点法线点乘，朝里则取反。
+3. `sin(time)` 映射到 `[0,1]`，沿面法线平移三个顶点，再乘 `projection * view` 后发射。
+4. 同一面两个三角形共面，位移相同，看起来是整面离开立方体。
 
-把 `geometryPass.gs` 的输出改成 `line_strip, max_vertices = 2`，并左右各偏 0.1 再发射两次，四个点会变成四条短横线。绘制函数仍然是 `GL_POINTS`，多出来的顶点是 GPU 上生成的。
+**法线外显（模式 3）**
 
-`Model.h` / `Mesh.h` 仍可用于后面的爆破和法线可视化：那些例子的输入布局是 `triangles`。
+1. 先按模式 1 画立方体。
+2. 同一 VAO 再画一遍：顶点着色器把位置和法线变到观察空间。
+3. 几何着色器对三个顶点各 `EmitVertex` 两次，输出 `line_strip`，`max_vertices = 6`。`MAGNITUDE = 0.35` 只影响线段长度。
+
+`geometryPass.*` 仍是直通点的最小例子，当前 `main.cpp` 没有挂它。`Shader` 第三参数继续用来链 `GL_GEOMETRY_SHADER`。
 
 ---
 
@@ -342,8 +353,10 @@ void GenerateLine(int index)
 | 现象 | 原因 |
 |------|------|
 | 几何着色器编译失败，提示 layout | 少了 `in` 或 `out` 那一行 layout；或 `max_vertices` 没写 |
-| 画面和没写几何着色器时一样，但也没有报错 | 直通着色器就是这样。四个绿点存在，说明已经链上 |
-| 四个点几乎看不见 | 没 `glEnable(GL_PROGRAM_POINT_SIZE)`，或没写 `gl_PointSize` |
+| 画面和没写几何着色器时一样，但也没有报错 | 直通着色器就是这样。模式 2 应看到面在动 |
+| 六个面往里收 / 穿插 | 叉乘顺序和环绕相反。应对顶点法线做点乘，朝里取反 |
+| 面分离方向被拉歪、近大远小 | 顶点着色器里已经乘了 `projection`。应停在世界 / 观察空间 |
+| 法线线段和物体对不上 | 位置和法线不在同一空间；可视化应在观察空间算完再乘投影 |
 | 什么都看不见 | 输入布局和绘制模式不一致，例如着色器写 `points` 却 `glDrawArrays(GL_TRIANGLES, ...)`；或只 `EmitVertex` 不 `EndPrimitive` |
 | 房子缺屋顶或少一条边 | `EmitVertex` 次数超过 `max_vertices`，多出来的被丢弃 |
 | 房子形状散成别的三角形 | 三角形带的顶点顺序错了。带是重叠的三个顶点一组，不是每三个顶点一个独立三角形 |
@@ -385,4 +398,4 @@ Day09 几何着色器（本文）← 一个图元进，可以多个图元出
 1. LearnOpenGL CN — [几何着色器](https://learnopengl-cn.github.io/04%20Advanced%20OpenGL/09%20Geometry%20Shader/)
 2. LearnOpenGL EN — [Geometry Shader](https://learnopengl.com/Advanced-OpenGL/Geometry-Shader)
 3. 《Part4 Day08 — 高级 GLSL》— 接口块；几何着色器的输入是这块的数组
-4. 本工程 `src/cppfile/main.cpp`、`shaders/geometryPass.gs` — 直通点；`Shader` 第三参数链接几何着色器
+4. 本工程 `src/cppfile/main.cpp` — 立方体面分离 + 法线外显；`shaders/gsExplode.gs`、`shaders/gsNormal.gs`
