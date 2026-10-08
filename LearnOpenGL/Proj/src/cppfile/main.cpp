@@ -5,8 +5,12 @@
 
 #include "../headfile/Shader.h"
 #include "../headfile/Camera.h"
+#include "../headfile/Model.h"
 
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,11 +19,12 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
+void setupRockInstanceAttribs(Model& rock, unsigned int instanceVBO);
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 const float CAMERA_NEAR_PLANE = 0.1f;
-const float CAMERA_FAR_PLANE = 100.0f;
+const float CAMERA_FAR_PLANE = 400.0f;
 
 unsigned int g_ScreenWidth = SCR_WIDTH;
 unsigned int g_ScreenHeight = SCR_HEIGHT;
@@ -28,22 +33,21 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 1 完整立方体 / 2 面分离（爆破） / 3 立方体 + 法线
-int g_mode = 2;
+// 1 实例化一次提交 / 2 循环多次 Draw（对比 draw call）
+int g_mode = 1;
 bool g_key1WasDown = false;
 bool g_key2WasDown = false;
-bool g_key3WasDown = false;
+
+const unsigned int ASTEROID_COUNT = 10000;
+const unsigned int NAIVE_COUNT = 500;
 
 // ---------------------------------------------------------------------------
-// Part4 Day09：几何着色器 —— 立方体面分离 + 法线外显
+// Part4 Day10：实例化 Instancing —— 小行星带
 //
-// 模式 1：普通顶点/片元，画一个带漫反射的立方体
-// 模式 2：几何着色器按三角形面法线把每个面推开再收回（爆破）
-//        layout (triangles) in  对上 glDrawArrays(GL_TRIANGLES, ...)
-//        同一面上两个三角形共面，叉乘法线方向相同 → 看起来是 6 个面在分离
-// 模式 3：先画立方体，再换一套 GS 沿每个顶点法线发射 line_strip（黄色）
-//
-// 爆破的位置停在世界空间，投影在 GS 里乘，避免裁剪空间里叉乘被透视拉歪。
+// 同一份 rock.obj，10000 个不同的 model 矩阵放进实例 VBO。
+// glVertexAttribDivisor(loc, 1)：这个属性每个实例更新一次，不是每个顶点一次。
+// glDrawElementsInstanced(..., ASTEROID_COUNT)：一次 draw call 画出整圈。
+// 按 2 改成循环 500 次普通 Draw，能感到 draw call 变多之后的差别。
 // ---------------------------------------------------------------------------
 
 int main()
@@ -58,7 +62,7 @@ int main()
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Geometry Shader", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Instancing / Asteroid Belt", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -79,75 +83,54 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    Shader cubeShader("shaders/gsCube.vs", "shaders/gsCube.fs");
-    Shader explodeShader("shaders/gsExplode.vs", "shaders/gsCube.fs", "shaders/gsExplode.gs");
-    Shader normalShader("shaders/gsNormal.vs", "shaders/gsNormal.fs", "shaders/gsNormal.gs");
+    Shader planetShader("shaders/planet.vs", "shaders/planet.fs");
+    Shader asteroidShader("shaders/asteroid.vs", "shaders/asteroid.fs");
 
-    Camera camera(glm::vec3(0.0f, 0.6f, 3.2f));
+    Model planet("Resource/TestLoadModel/planet.obj");
+    Model rock("Resource/TestLoadModel/rock.obj");
+
+    Camera camera(glm::vec3(0.0f, 8.0f, 55.0f));
     g_camera = &camera;
 
-    // 位置 + 法线。每个面 2 个三角形，法线沿面朝外，环绕逆时针
-    float cubeVertices[] = {
-        // 后 -Z
-        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-        // 前 +Z
-        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,
-        // 左 -X
-        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-        // 右 +X
-         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-        // 下 -Y
-        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-        // 上 +Y
-        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f
-    };
+    // 在半径 50 的圆环上撒点，再加位移 / 缩放 / 旋转，让每颗石头不一样
+    std::vector<glm::mat4> modelMatrices(ASTEROID_COUNT);
+    srand(static_cast<unsigned int>(glfwGetTime()));
+    const float radius = 50.0f;
+    const float offset = 12.5f;
+    for (unsigned int i = 0; i < ASTEROID_COUNT; ++i)
+    {
+        glm::mat4 model(1.0f);
+        const float angle = static_cast<float>(i) / static_cast<float>(ASTEROID_COUNT) * 2.0f * 3.14159265f;
+        float displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
+        const float x = std::sin(angle) * radius + displacement;
+        displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
+        const float y = displacement * 0.4f;
+        displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
+        const float z = std::cos(angle) * radius + displacement;
+        model = glm::translate(model, glm::vec3(x, y, z));
 
-    unsigned int cubeVAO = 0, cubeVBO = 0;
-    glGenVertexArrays(1, &cubeVAO);
-    glGenBuffers(1, &cubeVBO);
-    glBindVertexArray(cubeVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-    glBindVertexArray(0);
+        const float scale = (rand() % 20) / 100.0f + 0.05f;
+        model = glm::scale(model, glm::vec3(scale));
 
-    std::cout << "Geometry Shader Demo\n"
-              << "  1 = solid cube\n"
-              << "  2 = explode: faces separate along face normals\n"
-              << "  3 = cube + vertex-normal lines\n"
+        const float rotAngle = static_cast<float>(rand() % 360);
+        model = glm::rotate(model, glm::radians(rotAngle), glm::vec3(0.4f, 0.6f, 0.8f));
+
+        modelMatrices[i] = model;
+    }
+
+    unsigned int instanceVBO = 0;
+    glGenBuffers(1, &instanceVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(ASTEROID_COUNT * sizeof(glm::mat4)),
+                 modelMatrices.data(),
+                 GL_STATIC_DRAW);
+    setupRockInstanceAttribs(rock, instanceVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    std::cout << "Instancing / Asteroid Belt Demo\n"
+              << "  1 = glDrawElementsInstanced (" << ASTEROID_COUNT << " rocks, 1 draw call)\n"
+              << "  2 = naive loop (" << NAIVE_COUNT << " rocks, " << NAIVE_COUNT << " draw calls)\n"
               << "  WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
@@ -158,7 +141,7 @@ int main()
 
         processInput(window);
 
-        glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+        glClearColor(0.02f, 0.02f, 0.04f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = camera.GetViewMatrix();
@@ -166,42 +149,33 @@ int main()
         glm::mat4 projection = glm::perspective(
             glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
 
-        glm::mat4 model(1.0f);
-        model = glm::rotate(model, glm::radians(25.0f), glm::vec3(0.4f, 1.0f, 0.15f));
+        planetShader.use();
+        planetShader.setMat4("view", view);
+        planetShader.setMat4("projection", projection);
+        glm::mat4 planetModel(1.0f);
+        planetModel = glm::translate(planetModel, glm::vec3(0.0f, -3.0f, 0.0f));
+        planetModel = glm::scale(planetModel, glm::vec3(4.0f));
+        planetShader.setMat4("model", planetModel);
+        planet.Draw(planetShader);
 
-        const glm::vec3 lightDir = glm::vec3(-0.4f, -1.0f, -0.3f);
-
-        auto setLitUniforms = [&](Shader& s) {
-            s.setMat4("model", model);
-            s.setMat4("view", view);
-            s.setMat4("projection", projection);
-            s.setVec3("lightDir", lightDir.x, lightDir.y, lightDir.z);
-            s.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
-        };
-
-        glBindVertexArray(cubeVAO);
-
-        if (g_mode == 2)
+        if (g_mode == 1)
         {
-            explodeShader.use();
-            setLitUniforms(explodeShader);
-            explodeShader.setFloat("time", currentFrame);
-            glDrawArrays(GL_TRIANGLES, 0, 36);
+            asteroidShader.use();
+            asteroidShader.setMat4("view", view);
+            asteroidShader.setMat4("projection", projection);
+            rock.DrawInstanced(asteroidShader, ASTEROID_COUNT);
         }
         else
         {
-            cubeShader.use();
-            setLitUniforms(cubeShader);
-            glDrawArrays(GL_TRIANGLES, 0, 36);
-
-            if (g_mode == 3)
+            // 非实例化绘制读的是 uniform model。若仍用 asteroid.vs，
+            // gl_InstanceID 恒为 0，所有石头都会用实例缓冲里的第一份矩阵。
+            planetShader.use();
+            planetShader.setMat4("view", view);
+            planetShader.setMat4("projection", projection);
+            for (unsigned int i = 0; i < NAIVE_COUNT; ++i)
             {
-                // 同一份三角形再走一遍：GS 把每个顶点法线变成一条 line_strip
-                normalShader.use();
-                normalShader.setMat4("model", model);
-                normalShader.setMat4("view", view);
-                normalShader.setMat4("projection", projection);
-                glDrawArrays(GL_TRIANGLES, 0, 36);
+                planetShader.setMat4("model", modelMatrices[i]);
+                rock.Draw(planetShader);
             }
         }
 
@@ -210,10 +184,38 @@ int main()
     }
 
     g_camera = nullptr;
-    glDeleteVertexArrays(1, &cubeVAO);
-    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &instanceVBO);
     glfwTerminate();
     return 0;
+}
+
+// mat4 拆成 4 个 vec4 属性，divisor=1：每个实例换一次矩阵，顶点之间共用
+void setupRockInstanceAttribs(Model& rock, unsigned int instanceVBO)
+{
+    const std::size_t vec4Size = sizeof(glm::vec4);
+    for (unsigned int i = 0; i < rock.meshes.size(); ++i)
+    {
+        glBindVertexArray(rock.meshes[i].GetVAO());
+        glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)0);
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
+                              (void*)(1 * vec4Size));
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
+                              (void*)(2 * vec4Size));
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
+                              (void*)(3 * vec4Size));
+
+        glVertexAttribDivisor(3, 1);
+        glVertexAttribDivisor(4, 1);
+        glVertexAttribDivisor(5, 1);
+        glVertexAttribDivisor(6, 1);
+    }
+    glBindVertexArray(0);
 }
 
 void processInput(GLFWwindow* window)
@@ -231,17 +233,12 @@ void processInput(GLFWwindow* window)
     if (edge(window, GLFW_KEY_1, g_key1WasDown))
     {
         g_mode = 1;
-        std::cout << "[GS] solid cube\n";
+        std::cout << "[Instancing] DrawInstanced " << ASTEROID_COUNT << "\n";
     }
     if (edge(window, GLFW_KEY_2, g_key2WasDown))
     {
         g_mode = 2;
-        std::cout << "[GS] explode faces\n";
-    }
-    if (edge(window, GLFW_KEY_3, g_key3WasDown))
-    {
-        g_mode = 3;
-        std::cout << "[GS] vertex normals\n";
+        std::cout << "[Instancing] naive loop " << NAIVE_COUNT << "\n";
     }
 
     if (g_camera == nullptr)

@@ -50,6 +50,12 @@ public:
             meshes[i].Draw(shader);
     }
 
+    void DrawInstanced(Shader &shader, unsigned int instanceCount)
+    {
+        for(unsigned int i = 0; i < meshes.size(); i++)
+            meshes[i].DrawInstanced(shader, instanceCount);
+    }
+
 private:
     // loads a model with supported ASSIMP extensions from file and stores the resulting meshes in the meshes vector.
     void loadModel(string const &path)
@@ -64,7 +70,8 @@ private:
             return;
         }
         // retrieve the directory path of the filepath
-        directory = path.substr(0, path.find_last_of('/'));
+        const size_t slash = path.find_last_of("/\\");
+        directory = (slash == string::npos) ? string(".") : path.substr(0, slash);
 
         // process ASSIMP's root node recursively
         processNode(scene->mRootNode, scene);

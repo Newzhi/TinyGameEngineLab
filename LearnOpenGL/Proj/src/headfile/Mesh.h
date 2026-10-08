@@ -56,9 +56,41 @@ public:
         setupMesh();
     }
 
+    unsigned int GetVAO() const { return VAO; }
+
     // 绑定贴图采样器后，用 EBO 画出整个网格
     // shader 需在外部 use()；本函数会设置 material.texture_diffuseN 等 int uniform
     void Draw(Shader& shader)
+    {
+        bindTextures(shader);
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES,
+                       static_cast<GLsizei>(indices.size()),
+                       GL_UNSIGNED_INT,
+                       nullptr);
+        glBindVertexArray(0);
+    }
+
+    // 一次提交 instanceCount 份网格。模型矩阵走实例属性（location 3~6）
+    void DrawInstanced(Shader& shader, unsigned int instanceCount)
+    {
+        bindTextures(shader);
+        glBindVertexArray(VAO);
+        glDrawElementsInstanced(GL_TRIANGLES,
+                                static_cast<GLsizei>(indices.size()),
+                                GL_UNSIGNED_INT,
+                                nullptr,
+                                static_cast<GLsizei>(instanceCount));
+        glBindVertexArray(0);
+    }
+
+private:
+    // ----- GPU 侧缓冲对象 -----
+    unsigned int VAO = 0;
+    unsigned int VBO = 0;
+    unsigned int EBO = 0;
+
+    void bindTextures(Shader& shader)
     {
         unsigned int diffuseNr  = 1;
         unsigned int specularNr = 1;
@@ -67,10 +99,8 @@ public:
 
         for (unsigned int i = 0; i < textures.size(); i++)
         {
-            // 第 i 张贴图绑到纹理单元 i
             glActiveTexture(GL_TEXTURE0 + i);
 
-            // 按类型生成序号：texture_diffuse1, texture_diffuse2, texture_specular1, ...
             std::string number;
             const std::string& name = textures[i].type;
             if (name == "texture_diffuse")
@@ -82,26 +112,11 @@ public:
             else if (name == "texture_height")
                 number = std::to_string(heightNr++);
 
-            // 告诉 shader：名为 material.xxxN 的 sampler 使用纹理单元 i
-            // （具体命名可按你的 FS 调整；教程示例带 material. 前缀）
             shader.setInt("material." + name + number, static_cast<int>(i));
             glBindTexture(GL_TEXTURE_2D, textures[i].id);
         }
         glActiveTexture(GL_TEXTURE0);
-
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES,
-                       static_cast<GLsizei>(indices.size()),
-                       GL_UNSIGNED_INT,
-                       nullptr);
-        glBindVertexArray(0);
     }
-
-private:
-    // ----- GPU 侧缓冲对象 -----
-    unsigned int VAO = 0;
-    unsigned int VBO = 0;
-    unsigned int EBO = 0;
 
     // 创建并配置 VAO / VBO / EBO，以及三个顶点属性指针
     void setupMesh()
