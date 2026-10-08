@@ -6,7 +6,7 @@
 |------|------|
 | [Day09 几何着色器](../Day09/几何着色器GeometryShader.md) | 一个图元进、可以多个图元出 |
 | **本文档** | `gl_InstanceID`、实例数组、`glVertexAttribDivisor`、小行星带 |
-| 后续 | 抗锯齿 |
+| [Day11 抗锯齿](../Day11/抗锯齿AntiAliasing.md) | MSAA、离屏多重采样 FBO、还原 |
 
 **工程对照**：当前 `main.cpp` 是小行星带 Demo。中央一颗 `planet.obj`，周围 `rock.obj` 撒成圆环。`1` 用 `glDrawElementsInstanced` 一次画 10000 颗（默认）；`2` 循环 500 次普通 `Draw`，用来对比 draw call。
 
@@ -203,7 +203,7 @@ Day09 几何着色器
   ↓
 Day10 实例化（本文）← 一份网格，很多次绘制合成一次
   ↓
-抗锯齿
+Day11 抗锯齿（MSAA、离屏多重采样 FBO、还原）
 ```
 
 ---

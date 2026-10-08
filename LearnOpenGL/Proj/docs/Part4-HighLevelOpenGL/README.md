@@ -14,6 +14,7 @@ LearnOpenGL「[高级 OpenGL](https://learnopengl-cn.github.io/04%20Advanced%20O
 | [Day08](./Day08/) | 高级 GLSL：内建变量、接口块、Uniform 缓冲 |
 | [Day09](./Day09/) | 几何着色器：图元输入输出、房子、爆破、法线可视化 |
 | [Day10](./Day10/) | 实例化：实例数组、小行星带 |
+| [Day11](./Day11/) | 抗锯齿：MSAA、离屏多重采样 FBO、还原 |
 
 建议先完成 Part1（尤其坐标系统 / 深度缓冲入门）与 Part3，再进入本部分。
 
@@ -31,3 +32,4 @@ LearnOpenGL「[高级 OpenGL](https://learnopengl-cn.github.io/04%20Advanced%20O
 | 高级 GLSL | [Day08/高级GLSLAdvancedGLSL.md](./Day08/高级GLSLAdvancedGLSL.md) |
 | 几何着色器 | [Day09/几何着色器GeometryShader.md](./Day09/几何着色器GeometryShader.md) |
 | 实例化 | [Day10/实例化Instancing.md](./Day10/实例化Instancing.md) |
+| 抗锯齿 | [Day11/抗锯齿AntiAliasing.md](./Day11/抗锯齿AntiAliasing.md) |

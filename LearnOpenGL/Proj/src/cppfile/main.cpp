@@ -5,12 +5,8 @@
 
 #include "../headfile/Shader.h"
 #include "../headfile/Camera.h"
-#include "../headfile/Model.h"
 
-#include <cmath>
-#include <cstdlib>
 #include <iostream>
-#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -19,12 +15,14 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
-void setupRockInstanceAttribs(Model& rock, unsigned int instanceVBO);
+void recreateFramebuffers(int width, int height);
+void drawCube(const Shader& shader, unsigned int vao, const glm::mat4& view, const glm::mat4& projection);
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 const float CAMERA_NEAR_PLANE = 0.1f;
-const float CAMERA_FAR_PLANE = 400.0f;
+const float CAMERA_FAR_PLANE = 100.0f;
+const int MSAA_SAMPLES = 4;
 
 unsigned int g_ScreenWidth = SCR_WIDTH;
 unsigned int g_ScreenHeight = SCR_HEIGHT;
@@ -33,21 +31,24 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 1 实例化一次提交 / 2 循环多次 Draw（对比 draw call）
-int g_mode = 1;
+// 1 无 MSAA（锯齿） / 2 离屏 4x MSAA 再 blit 到窗口 / 3 MSAA 还原成 2D 纹理后全屏采样（可灰度）
+int g_mode = 2;
 bool g_key1WasDown = false;
 bool g_key2WasDown = false;
+bool g_key3WasDown = false;
 
-const unsigned int ASTEROID_COUNT = 10000;
-const unsigned int NAIVE_COUNT = 500;
+unsigned int g_msaaFBO = 0, g_msaaColor = 0, g_msaaRBO = 0;
+unsigned int g_resolveFBO = 0, g_resolveColor = 0;
 
 // ---------------------------------------------------------------------------
-// Part4 Day10：实例化 Instancing —— 小行星带
+// Part4 Day11：抗锯齿 Anti-Aliasing —— 离屏 MSAA
 //
-// 同一份 rock.obj，10000 个不同的 model 矩阵放进实例 VBO。
-// glVertexAttribDivisor(loc, 1)：这个属性每个实例更新一次，不是每个顶点一次。
-// glDrawElementsInstanced(..., ASTEROID_COUNT)：一次 draw call 画出整圈。
-// 按 2 改成循环 500 次普通 Draw，能感到 draw call 变多之后的差别。
+// 窗口本身不请求多重采样缓冲（GLFW_SAMPLES 保持默认 0），对比才看得见。
+//   1) 直接画到默认帧缓冲：每个像素 1 个采样点，边缘锯齿
+//   2) 画到 4x 多重采样 FBO，glBlitFramebuffer 还原到窗口：边缘被覆盖率混合平滑
+//   3) 先 blit 到普通 2D 纹理 FBO，再全屏四边形采样（演示「不能直接采样 MSAA 纹理」）
+//
+// MSAA：每个像素多个子采样点决定覆盖率；每个图元每个像素仍只跑一次片元着色器。
 // ---------------------------------------------------------------------------
 
 int main()
@@ -56,13 +57,15 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // 不设 GLFW_SAMPLES：默认颜色缓冲每像素 1 个样本，模式 1 才能看出锯齿。
+    // 若在这里写 glfwWindowHint(GLFW_SAMPLES, 4)，默认帧缓冲本身就是 4x MSAA。
 
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Instancing / Asteroid Belt", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Anti-Aliasing / MSAA", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -82,56 +85,100 @@ int main()
     }
 
     glEnable(GL_DEPTH_TEST);
+    // 画到多重采样附件时，显式打开。多数驱动默认已开，写上更保险。
+    glEnable(GL_MULTISAMPLE);
 
-    Shader planetShader("shaders/planet.vs", "shaders/planet.fs");
-    Shader asteroidShader("shaders/asteroid.vs", "shaders/asteroid.fs");
+    Shader cubeShader("shaders/msaa.vs", "shaders/msaa.fs");
+    Shader screenShader("shaders/msaaScreen.vs", "shaders/msaaScreen.fs");
+    screenShader.use();
+    screenShader.setInt("screenTexture", 0);
 
-    Model planet("Resource/TestLoadModel/planet.obj");
-    Model rock("Resource/TestLoadModel/rock.obj");
-
-    Camera camera(glm::vec3(0.0f, 8.0f, 55.0f));
+    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    // 在半径 50 的圆环上撒点，再加位移 / 缩放 / 旋转，让每颗石头不一样
-    std::vector<glm::mat4> modelMatrices(ASTEROID_COUNT);
-    srand(static_cast<unsigned int>(glfwGetTime()));
-    const float radius = 50.0f;
-    const float offset = 12.5f;
-    for (unsigned int i = 0; i < ASTEROID_COUNT; ++i)
-    {
-        glm::mat4 model(1.0f);
-        const float angle = static_cast<float>(i) / static_cast<float>(ASTEROID_COUNT) * 2.0f * 3.14159265f;
-        float displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
-        const float x = std::sin(angle) * radius + displacement;
-        displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
-        const float y = displacement * 0.4f;
-        displacement = (rand() % static_cast<int>(2 * offset * 100)) / 100.0f - offset;
-        const float z = std::cos(angle) * radius + displacement;
-        model = glm::translate(model, glm::vec3(x, y, z));
+    // 位置 + 颜色。六个面颜色不同，斜看时轮廓锯齿更明显
+    float cubeVertices[] = {
+        -0.5f, -0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
+         0.5f, -0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
+         0.5f,  0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
+         0.5f,  0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
+        -0.5f,  0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
+        -0.5f, -0.5f, -0.5f,  0.20f, 0.75f, 0.30f,
 
-        const float scale = (rand() % 20) / 100.0f + 0.05f;
-        model = glm::scale(model, glm::vec3(scale));
+        -0.5f, -0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
+         0.5f, -0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
+         0.5f,  0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
+         0.5f,  0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
+        -0.5f,  0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
+        -0.5f, -0.5f,  0.5f,  0.85f, 0.35f, 0.20f,
 
-        const float rotAngle = static_cast<float>(rand() % 360);
-        model = glm::rotate(model, glm::radians(rotAngle), glm::vec3(0.4f, 0.6f, 0.8f));
+        -0.5f,  0.5f,  0.5f,  0.25f, 0.45f, 0.90f,
+        -0.5f,  0.5f, -0.5f,  0.25f, 0.45f, 0.90f,
+        -0.5f, -0.5f, -0.5f,  0.25f, 0.45f, 0.90f,
+        -0.5f, -0.5f, -0.5f,  0.25f, 0.45f, 0.90f,
+        -0.5f, -0.5f,  0.5f,  0.25f, 0.45f, 0.90f,
+        -0.5f,  0.5f,  0.5f,  0.25f, 0.45f, 0.90f,
 
-        modelMatrices[i] = model;
-    }
+         0.5f,  0.5f,  0.5f,  0.90f, 0.80f, 0.20f,
+         0.5f,  0.5f, -0.5f,  0.90f, 0.80f, 0.20f,
+         0.5f, -0.5f, -0.5f,  0.90f, 0.80f, 0.20f,
+         0.5f, -0.5f, -0.5f,  0.90f, 0.80f, 0.20f,
+         0.5f, -0.5f,  0.5f,  0.90f, 0.80f, 0.20f,
+         0.5f,  0.5f,  0.5f,  0.90f, 0.80f, 0.20f,
 
-    unsigned int instanceVBO = 0;
-    glGenBuffers(1, &instanceVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(ASTEROID_COUNT * sizeof(glm::mat4)),
-                 modelMatrices.data(),
-                 GL_STATIC_DRAW);
-    setupRockInstanceAttribs(rock, instanceVBO);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+        -0.5f, -0.5f, -0.5f,  0.70f, 0.25f, 0.70f,
+         0.5f, -0.5f, -0.5f,  0.70f, 0.25f, 0.70f,
+         0.5f, -0.5f,  0.5f,  0.70f, 0.25f, 0.70f,
+         0.5f, -0.5f,  0.5f,  0.70f, 0.25f, 0.70f,
+        -0.5f, -0.5f,  0.5f,  0.70f, 0.25f, 0.70f,
+        -0.5f, -0.5f, -0.5f,  0.70f, 0.25f, 0.70f,
 
-    std::cout << "Instancing / Asteroid Belt Demo\n"
-              << "  1 = glDrawElementsInstanced (" << ASTEROID_COUNT << " rocks, 1 draw call)\n"
-              << "  2 = naive loop (" << NAIVE_COUNT << " rocks, " << NAIVE_COUNT << " draw calls)\n"
-              << "  WASD + mouse, ESC quit\n";
+        -0.5f,  0.5f, -0.5f,  0.20f, 0.85f, 0.80f,
+         0.5f,  0.5f, -0.5f,  0.20f, 0.85f, 0.80f,
+         0.5f,  0.5f,  0.5f,  0.20f, 0.85f, 0.80f,
+         0.5f,  0.5f,  0.5f,  0.20f, 0.85f, 0.80f,
+        -0.5f,  0.5f,  0.5f,  0.20f, 0.85f, 0.80f,
+        -0.5f,  0.5f, -0.5f,  0.20f, 0.85f, 0.80f
+    };
+
+    unsigned int cubeVAO = 0, cubeVBO = 0;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+
+    float quadVertices[] = {
+        -1.0f,  1.0f,  0.0f, 1.0f,
+        -1.0f, -1.0f,  0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+        -1.0f,  1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f, 1.0f
+    };
+    unsigned int quadVAO = 0, quadVBO = 0;
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glBindVertexArray(0);
+
+    recreateFramebuffers(static_cast<int>(g_ScreenWidth), static_cast<int>(g_ScreenHeight));
+
+    std::cout << "Anti-Aliasing / MSAA Demo\n"
+              << "  1 = no MSAA (jagged edges on default framebuffer)\n"
+              << "  2 = 4x MSAA FBO, blit resolve to window (default)\n"
+              << "  3 = MSAA resolve to 2D texture, then fullscreen sample (grayscale)\n"
+              << "  look at cube silhouette; WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
     {
@@ -141,41 +188,60 @@ int main()
 
         processInput(window);
 
-        glClearColor(0.02f, 0.02f, 0.04f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
         glm::mat4 view = camera.GetViewMatrix();
         float aspect = static_cast<float>(g_ScreenWidth) / static_cast<float>(g_ScreenHeight);
         glm::mat4 projection = glm::perspective(
             glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
 
-        planetShader.use();
-        planetShader.setMat4("view", view);
-        planetShader.setMat4("projection", projection);
-        glm::mat4 planetModel(1.0f);
-        planetModel = glm::translate(planetModel, glm::vec3(0.0f, -3.0f, 0.0f));
-        planetModel = glm::scale(planetModel, glm::vec3(4.0f));
-        planetShader.setMat4("model", planetModel);
-        planet.Draw(planetShader);
+        const int w = static_cast<int>(g_ScreenWidth);
+        const int h = static_cast<int>(g_ScreenHeight);
 
         if (g_mode == 1)
         {
-            asteroidShader.use();
-            asteroidShader.setMat4("view", view);
-            asteroidShader.setMat4("projection", projection);
-            rock.DrawInstanced(asteroidShader, ASTEROID_COUNT);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, w, h);
+            glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glEnable(GL_DEPTH_TEST);
+            drawCube(cubeShader, cubeVAO, view, projection);
         }
         else
         {
-            // 非实例化绘制读的是 uniform model。若仍用 asteroid.vs，
-            // gl_InstanceID 恒为 0，所有石头都会用实例缓冲里的第一份矩阵。
-            planetShader.use();
-            planetShader.setMat4("view", view);
-            planetShader.setMat4("projection", projection);
-            for (unsigned int i = 0; i < NAIVE_COUNT; ++i)
+            // 画进 4x 多重采样 FBO：光栅器按覆盖率写入各个子样本
+            glBindFramebuffer(GL_FRAMEBUFFER, g_msaaFBO);
+            glViewport(0, 0, w, h);
+            glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glEnable(GL_DEPTH_TEST);
+            drawCube(cubeShader, cubeVAO, view, projection);
+
+            if (g_mode == 2)
             {
-                planetShader.setMat4("model", modelMatrices[i]);
-                rock.Draw(planetShader);
+                // 还原(resolve)：把多重采样颜色平均成单样本，拷到默认帧缓冲
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, g_msaaFBO);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+                glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            }
+            else
+            {
+                // 先还原到普通 2D 纹理，才能在片元着色器里 texture()
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, g_msaaFBO);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_resolveFBO);
+                glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glViewport(0, 0, w, h);
+                glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                glDisable(GL_DEPTH_TEST);
+
+                screenShader.use();
+                screenShader.setInt("uGray", 1);
+                glBindVertexArray(quadVAO);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, g_resolveColor);
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+                glEnable(GL_DEPTH_TEST);
             }
         }
 
@@ -184,38 +250,74 @@ int main()
     }
 
     g_camera = nullptr;
-    glDeleteBuffers(1, &instanceVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &quadVBO);
+    recreateFramebuffers(0, 0);
     glfwTerminate();
     return 0;
 }
 
-// mat4 拆成 4 个 vec4 属性，divisor=1：每个实例换一次矩阵，顶点之间共用
-void setupRockInstanceAttribs(Model& rock, unsigned int instanceVBO)
+void drawCube(const Shader& shader, unsigned int vao, const glm::mat4& view, const glm::mat4& projection)
 {
-    const std::size_t vec4Size = sizeof(glm::vec4);
-    for (unsigned int i = 0; i < rock.meshes.size(); ++i)
+    shader.use();
+    shader.setMat4("view", view);
+    shader.setMat4("projection", projection);
+    glm::mat4 model(1.0f);
+    model = glm::rotate(model, glm::radians(35.0f), glm::vec3(0.4f, 1.0f, 0.2f));
+    shader.setMat4("model", model);
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+}
+
+void recreateFramebuffers(int width, int height)
+{
+    if (g_msaaFBO != 0)
     {
-        glBindVertexArray(rock.meshes[i].GetVAO());
-        glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), (void*)0);
-        glEnableVertexAttribArray(4);
-        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
-                              (void*)(1 * vec4Size));
-        glEnableVertexAttribArray(5);
-        glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
-                              (void*)(2 * vec4Size));
-        glEnableVertexAttribArray(6);
-        glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
-                              (void*)(3 * vec4Size));
-
-        glVertexAttribDivisor(3, 1);
-        glVertexAttribDivisor(4, 1);
-        glVertexAttribDivisor(5, 1);
-        glVertexAttribDivisor(6, 1);
+        glDeleteFramebuffers(1, &g_msaaFBO);
+        glDeleteTextures(1, &g_msaaColor);
+        glDeleteRenderbuffers(1, &g_msaaRBO);
+        glDeleteFramebuffers(1, &g_resolveFBO);
+        glDeleteTextures(1, &g_resolveColor);
+        g_msaaFBO = g_msaaColor = g_msaaRBO = 0;
+        g_resolveFBO = g_resolveColor = 0;
     }
-    glBindVertexArray(0);
+    if (width <= 0 || height <= 0)
+        return;
+
+    // ----- 多重采样 FBO：颜色用多重采样纹理，深度/模板用多重采样 RBO -----
+    glGenFramebuffers(1, &g_msaaFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_msaaFBO);
+
+    glGenTextures(1, &g_msaaColor);
+    glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, g_msaaColor);
+    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, MSAA_SAMPLES, GL_RGB, width, height, GL_TRUE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D_MULTISAMPLE, g_msaaColor, 0);
+
+    glGenRenderbuffers(1, &g_msaaRBO);
+    glBindRenderbuffer(GL_RENDERBUFFER, g_msaaRBO);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, MSAA_SAMPLES, GL_DEPTH24_STENCIL8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g_msaaRBO);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cout << "MSAA framebuffer is not complete\n";
+
+    // ----- 普通 FBO：接收 blit 还原后的单样本颜色，给全屏四边形采样 -----
+    glGenFramebuffers(1, &g_resolveFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_resolveFBO);
+    glGenTextures(1, &g_resolveColor);
+    glBindTexture(GL_TEXTURE_2D, g_resolveColor);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_resolveColor, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cout << "Resolve framebuffer is not complete\n";
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void processInput(GLFWwindow* window)
@@ -233,12 +335,17 @@ void processInput(GLFWwindow* window)
     if (edge(window, GLFW_KEY_1, g_key1WasDown))
     {
         g_mode = 1;
-        std::cout << "[Instancing] DrawInstanced " << ASTEROID_COUNT << "\n";
+        std::cout << "[MSAA] off (jagged)\n";
     }
     if (edge(window, GLFW_KEY_2, g_key2WasDown))
     {
         g_mode = 2;
-        std::cout << "[Instancing] naive loop " << NAIVE_COUNT << "\n";
+        std::cout << "[MSAA] 4x FBO + blit to window\n";
+    }
+    if (edge(window, GLFW_KEY_3, g_key3WasDown))
+    {
+        g_mode = 3;
+        std::cout << "[MSAA] resolve to texture + grayscale quad\n";
     }
 
     if (g_camera == nullptr)
@@ -275,4 +382,5 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     g_ScreenWidth = static_cast<unsigned int>(width);
     g_ScreenHeight = static_cast<unsigned int>(height);
     glViewport(0, 0, width, height);
+    recreateFramebuffers(width, height);
 }
