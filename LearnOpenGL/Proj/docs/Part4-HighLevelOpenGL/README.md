@@ -16,7 +16,7 @@ LearnOpenGL「[高级 OpenGL](https://learnopengl-cn.github.io/04%20Advanced%20O
 | [Day10](./Day10/) | 实例化：实例数组、小行星带 |
 | [Day11](./Day11/) | 抗锯齿：MSAA、离屏多重采样 FBO、还原 |
 
-建议先完成 Part1（尤其坐标系统 / 深度缓冲入门）与 Part3，再进入本部分。
+建议先完成 Part1（尤其坐标系统 / 深度缓冲入门）与 Part3，再进入本部分。下一阶段见 [Part5 高级光照](../Part5-HighLevelLighting/README.md)。
 
 ## 快速入口
 

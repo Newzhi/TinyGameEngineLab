@@ -88,7 +88,7 @@ lightingShader.setVec3("light.direction", -0.2f, -1.0f, -0.3f);
 
 点光 = 世界中某点 + **朝所有方向**发光。此前我们缺的是 **衰减（Attenuation）**：远处应变暗，否则后排箱子和灯前一样亮。
 
-线性衰减往往假；现实近处很亮、先快后慢减弱。常用二次公式：
+线性衰减往往假；现实近处很亮、先快后慢减弱。常用二次公式（未做 Gamma 校正时，`1/d²` 会显得过狠，原因见 [Part5 Day02](../../Part5-HighLevelLighting/Day02/Gamma校正GammaCorrection.md)）：
 
 ```
 Fatt = 1.0 / (Kc + Kl * d + Kq * d²)

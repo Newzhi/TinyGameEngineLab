@@ -45,3 +45,4 @@
 | Part 2 光照 | `Proj/docs/Part2-Lighting/README.md` |
 | Part 3 模型加载 | `Proj/docs/Part3-LoadModel/README.md` |
 | Part 4 高级 OpenGL | `Proj/docs/Part4-HighLevelOpenGL/README.md` |
+| Part 5 高级光照 | `Proj/docs/Part5-HighLevelLighting/README.md` |

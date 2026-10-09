@@ -186,7 +186,7 @@ Day10 实例化
   ↓
 Day11 抗锯齿（本文）← MSAA 覆盖率 + 离屏还原
   ↓
-Part5 高级光照 …
+Part5 Day01 高级光照（Blinn-Phong）
 ```
 
 ---
