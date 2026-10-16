@@ -8,6 +8,7 @@
 | [Part4 Day01 深度测试](../../Part4-HighLevelOpenGL/Day01/深度测试DepthTesting.md) | 深度缓冲、非线性 z |
 | [Part4 Day05 帧缓冲](../../Part4-HighLevelOpenGL/Day05/帧缓冲Framebuffers.md) | 离屏 FBO、深度附件 |
 | **本文档** | 深度贴图、光源空间、阴影比较、偏移 / PCF |
+| [Day04 点阴影](../Day04/点阴影PointShadows.md) | 深度立方体、万向阴影 |
 
 **工程对照**：当前 `main.cpp` 是地板 + 三只箱子 + 一盏定向光（用虚拟位置做 `lookAt`）。先渲染 1024² 深度贴图，再画场景。`1` 只光照无阴影；`2` 硬阴影（默认）；`3` 3×3 PCF 软边；`4` 把深度贴图铺到全屏。
 
@@ -224,7 +225,7 @@ Part5 Day02 Gamma 校正
   ↓
 Part5 Day03 阴影映射（本文）← 灯视角深度图 + 比较
   ↓
-点阴影（立方体深度贴图）…
+Part5 Day04 点阴影（深度立方体）
 ```
 
 ---

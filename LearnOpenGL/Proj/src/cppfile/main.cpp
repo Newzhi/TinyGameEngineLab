@@ -17,19 +17,13 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
 unsigned int loadTexture(const char* path);
-void renderScene(const Shader& shader, bool depthPass);
-void renderCube();
-void renderPlane();
 void renderQuad();
+void renderCube();
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-const unsigned int SHADOW_WIDTH = 1024;
-const unsigned int SHADOW_HEIGHT = 1024;
 const float CAMERA_NEAR_PLANE = 0.1f;
 const float CAMERA_FAR_PLANE = 100.0f;
-const float LIGHT_NEAR = 1.0f;
-const float LIGHT_FAR = 7.5f;
 
 unsigned int g_ScreenWidth = SCR_WIDTH;
 unsigned int g_ScreenHeight = SCR_HEIGHT;
@@ -38,28 +32,50 @@ Camera* g_camera = nullptr;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// 1 无阴影 / 2 硬阴影 / 3 PCF / 4 深度贴图可视化
-int g_mode = 2;
+// 0 几何法线 / 1 法线贴图 / 2 把切线空间法线画成颜色
+int g_mode = 1;
 bool g_key1WasDown = false;
 bool g_key2WasDown = false;
 bool g_key3WasDown = false;
-bool g_key4WasDown = false;
 
-const glm::vec3 LIGHT_POS(-2.0f, 4.0f, -1.0f);
+glm::vec3 g_lightPos(0.5f, 1.0f, 0.3f);
 
-unsigned int g_planeVAO = 0, g_planeVBO = 0;
-unsigned int g_cubeVAO = 0, g_cubeVBO = 0;
 unsigned int g_quadVAO = 0, g_quadVBO = 0;
+unsigned int g_cubeVAO = 0, g_cubeVBO = 0;
 
 // ---------------------------------------------------------------------------
-// Part5 Day03：阴影映射
+// Part5 Day05：法线贴图（切线空间）
 //
-// Pass 1：把相机放到灯上，正交投影，只把最近深度写入 1024² 纹理。
-// Pass 2：正常画场景，片元变到光源空间，和深度图比较：更远的就是影。
-// 偏移消除摩尔纹；箱子深度 Pass 正面剔除减轻悬浮；边界钳制 + z>1 处理视锥外。
+// 砖墙几何只是一块四边形，顶点法线全是 (0,0,1)，光照会把它当成平板。
+// 法线图给每个片元一条相对表面的法线（贴图里偏蓝 = 切线空间 +Z）。
+// CPU 用边和 ΔUV 算出 T / B，顶点着色器做 Gram-Schmidt 得到 TBN，
+// 把灯、相机、片元变到切线空间；片元里采样法线后做 Blinn-Phong。
 //
-// 1 无阴影    2 硬阴影（默认）    3 PCF    4 全屏深度图
+// 1 几何法线    2 法线贴图（默认）    3 可视化解包后的法线
 // ---------------------------------------------------------------------------
+
+void calcTangentBitangent(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
+                          const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
+                          glm::vec3& tangent, glm::vec3& bitangent)
+{
+    // 边 = Δu * T + Δv * B，解出 T、B（与教程矩阵求逆同一式子）
+    glm::vec3 edge1 = p1 - p0;
+    glm::vec3 edge2 = p2 - p0;
+    glm::vec2 deltaUV1 = uv1 - uv0;
+    glm::vec2 deltaUV2 = uv2 - uv0;
+
+    float f = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y);
+
+    tangent.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+    tangent.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+    tangent.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+    tangent = glm::normalize(tangent);
+
+    bitangent.x = f * (-deltaUV2.x * edge1.x + deltaUV1.x * edge2.x);
+    bitangent.y = f * (-deltaUV2.x * edge1.y + deltaUV1.x * edge2.y);
+    bitangent.z = f * (-deltaUV2.x * edge1.z + deltaUV1.x * edge2.z);
+    bitangent = glm::normalize(bitangent);
+}
 
 int main()
 {
@@ -73,7 +89,7 @@ int main()
 #endif
 
     GLFWwindow* window = glfwCreateWindow(
-        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Shadow Mapping", NULL, NULL);
+        SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL - Normal Mapping", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -94,53 +110,25 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    Shader depthShader("shaders/Part5-HighLevelLighting/Day03-ShadowMapping/shadowDepth.vs",
-                       "shaders/Part5-HighLevelLighting/Day03-ShadowMapping/shadowDepth.fs");
-    Shader sceneShader("shaders/Part5-HighLevelLighting/Day03-ShadowMapping/shadow.vs",
-                       "shaders/Part5-HighLevelLighting/Day03-ShadowMapping/shadow.fs");
-    Shader debugShader("shaders/Part5-HighLevelLighting/Day03-ShadowMapping/debugDepth.vs",
-                       "shaders/Part5-HighLevelLighting/Day03-ShadowMapping/debugDepth.fs");
+    Shader shader(
+        "shaders/Part5-HighLevelLighting/Day05-NormalMapping/normalMapping.vs",
+        "shaders/Part5-HighLevelLighting/Day05-NormalMapping/normalMapping.fs");
     Shader lampShader("shaders/common/lamp.vs", "shaders/common/lamp.fs");
-    sceneShader.use();
-    sceneShader.setInt("diffuseTexture", 0);
-    sceneShader.setInt("shadowMap", 1);
-    debugShader.use();
-    debugShader.setInt("depthMap", 0);
+    shader.use();
+    shader.setInt("diffuseMap", 0);
+    shader.setInt("normalMap", 1);
 
-    Camera camera(glm::vec3(0.0f, 2.0f, 6.0f));
+    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
     g_camera = &camera;
 
-    unsigned int woodTexture = loadTexture("Resource/Texture/container.jpg");
+    unsigned int diffuseMap = loadTexture("Resource/Texture/brickwall.jpg");
+    unsigned int normalMap = loadTexture("Resource/Texture/brickwall_normal.jpg");
 
-    // ----- 只挂深度附件的 FBO：颜色读写关掉，否则不完整 -----
-    unsigned int depthMapFBO = 0, depthMap = 0;
-    glGenFramebuffers(1, &depthMapFBO);
-    glGenTextures(1, &depthMap);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT,
-                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    // 视锥外 UV 采到 1.0，不会被误判成阴影（GL_REPEAT 会在远处铺出假影子）
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        std::cout << "Shadow depth framebuffer is not complete\n";
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    std::cout << "Shadow Mapping Demo\n"
-              << "  1 = lighting only (no shadows)\n"
-              << "  2 = hard shadows + slope bias (default)\n"
-              << "  3 = 3x3 PCF\n"
-              << "  4 = visualize depth map (near=black)\n"
-              << "  WASD + mouse, ESC quit\n";
+    std::cout << "Normal Mapping Demo\n"
+              << "  1 = vertex / geometry normal (flat wall)\n"
+              << "  2 = tangent-space normal mapping (default)\n"
+              << "  3 = visualize unpacked tangent normals\n"
+              << "  plane rotates; WASD + mouse, ESC quit\n";
 
     while (!glfwWindowShouldClose(window))
     {
@@ -150,146 +138,111 @@ int main()
 
         processInput(window);
 
-        glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, LIGHT_NEAR, LIGHT_FAR);
-        glm::mat4 lightView = glm::lookAt(LIGHT_POS, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-
-        // Pass 1：从灯看场景，只写最近深度
-        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        depthShader.use();
-        depthShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-        renderScene(depthShader, true);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        glViewport(0, 0, static_cast<int>(g_ScreenWidth), static_cast<int>(g_ScreenHeight));
         glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        if (g_mode == 4)
-        {
-            debugShader.use();
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, depthMap);
-            renderQuad();
-        }
-        else
-        {
-            glm::mat4 view = camera.GetViewMatrix();
-            float aspect = static_cast<float>(g_ScreenWidth) / static_cast<float>(g_ScreenHeight);
-            glm::mat4 projection = glm::perspective(
-                glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
+        glm::mat4 view = camera.GetViewMatrix();
+        float aspect = static_cast<float>(g_ScreenWidth) / static_cast<float>(g_ScreenHeight);
+        glm::mat4 projection = glm::perspective(
+            glm::radians(camera.Zoom), aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE);
 
-            sceneShader.use();
-            sceneShader.setMat4("view", view);
-            sceneShader.setMat4("projection", projection);
-            sceneShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-            sceneShader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
-            sceneShader.setVec3("lightPos", LIGHT_POS.x, LIGHT_POS.y, LIGHT_POS.z);
-            sceneShader.setInt("uShadowMode", g_mode == 1 ? 0 : (g_mode == 3 ? 2 : 1));
+        shader.use();
+        shader.setMat4("view", view);
+        shader.setMat4("projection", projection);
+        shader.setVec3("viewPos", camera.Position.x, camera.Position.y, camera.Position.z);
+        shader.setVec3("lightPos", g_lightPos.x, g_lightPos.y, g_lightPos.z);
+        shader.setInt("uMode", g_mode);
 
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, woodTexture);
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, depthMap);
-            renderScene(sceneShader, false);
+        // 绕斜轴转：切线空间对了，转到侧面砖缝明暗仍然贴着纹理
+        glm::mat4 model(1.0f);
+        model = glm::rotate(model, currentFrame * -0.15f, glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f)));
+        shader.setMat4("model", model);
 
-            lampShader.use();
-            lampShader.setMat4("view", view);
-            lampShader.setMat4("projection", projection);
-            lampShader.setVec3("lightColor", 1.0f, 1.0f, 1.0f);
-            glm::mat4 lampModel(1.0f);
-            lampModel = glm::translate(lampModel, LIGHT_POS);
-            lampModel = glm::scale(lampModel, glm::vec3(0.15f));
-            lampShader.setMat4("model", lampModel);
-            renderCube();
-        }
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, diffuseMap);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, normalMap);
+        renderQuad();
+
+        lampShader.use();
+        lampShader.setMat4("view", view);
+        lampShader.setMat4("projection", projection);
+        lampShader.setVec3("lightColor", 1.0f, 1.0f, 1.0f);
+        glm::mat4 lampModel(1.0f);
+        lampModel = glm::translate(lampModel, g_lightPos);
+        lampModel = glm::scale(lampModel, glm::vec3(0.1f));
+        lampShader.setMat4("model", lampModel);
+        renderCube();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
     g_camera = nullptr;
-    glDeleteVertexArrays(1, &g_planeVAO);
-    glDeleteVertexArrays(1, &g_cubeVAO);
     glDeleteVertexArrays(1, &g_quadVAO);
-    glDeleteBuffers(1, &g_planeVBO);
-    glDeleteBuffers(1, &g_cubeVBO);
     glDeleteBuffers(1, &g_quadVBO);
-    glDeleteTextures(1, &woodTexture);
-    glDeleteTextures(1, &depthMap);
-    glDeleteFramebuffers(1, &depthMapFBO);
+    glDeleteVertexArrays(1, &g_cubeVAO);
+    glDeleteBuffers(1, &g_cubeVBO);
+    glDeleteTextures(1, &diffuseMap);
+    glDeleteTextures(1, &normalMap);
     glfwTerminate();
     return 0;
 }
 
-void renderScene(const Shader& shader, bool depthPass)
+void renderQuad()
 {
-    glm::mat4 model(1.0f);
-    shader.setMat4("model", model);
-    renderPlane();
-
-    // 深度 Pass 对封闭箱子剔正面，减轻偏移造成的影子悬浮；地板是单面，不能剔。
-    if (depthPass)
+    if (g_quadVAO == 0)
     {
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
-    }
+        glm::vec3 pos1(-1.0f,  1.0f, 0.0f);
+        glm::vec3 pos2(-1.0f, -1.0f, 0.0f);
+        glm::vec3 pos3( 1.0f, -1.0f, 0.0f);
+        glm::vec3 pos4( 1.0f,  1.0f, 0.0f);
+        glm::vec2 uv1(0.0f, 1.0f);
+        glm::vec2 uv2(0.0f, 0.0f);
+        glm::vec2 uv3(1.0f, 0.0f);
+        glm::vec2 uv4(1.0f, 1.0f);
+        glm::vec3 nm(0.0f, 0.0f, 1.0f);
 
-    model = glm::mat4(1.0f);
-    model = glm::translate(model, glm::vec3(0.0f, 1.5f, 0.0f));
-    model = glm::scale(model, glm::vec3(0.5f));
-    shader.setMat4("model", model);
-    renderCube();
+        glm::vec3 tangent1, bitangent1, tangent2, bitangent2;
+        calcTangentBitangent(pos1, pos2, pos3, uv1, uv2, uv3, tangent1, bitangent1);
+        calcTangentBitangent(pos1, pos3, pos4, uv1, uv3, uv4, tangent2, bitangent2);
 
-    model = glm::mat4(1.0f);
-    model = glm::translate(model, glm::vec3(2.0f, 0.0f, 1.0f));
-    model = glm::scale(model, glm::vec3(0.5f));
-    shader.setMat4("model", model);
-    renderCube();
+        // pos.xyz, normal.xyz, uv.st, tangent.xyz, bitangent.xyz
+        float quadVertices[] = {
+            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y,
+            tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+            pos2.x, pos2.y, pos2.z, nm.x, nm.y, nm.z, uv2.x, uv2.y,
+            tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y,
+            tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
 
-    model = glm::mat4(1.0f);
-    model = glm::translate(model, glm::vec3(-1.0f, 0.0f, 2.0f));
-    model = glm::rotate(model, glm::radians(60.0f), glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f)));
-    model = glm::scale(model, glm::vec3(0.25f));
-    shader.setMat4("model", model);
-    renderCube();
-
-    if (depthPass)
-    {
-        glCullFace(GL_BACK);
-        glDisable(GL_CULL_FACE);
-    }
-}
-
-void renderPlane()
-{
-    if (g_planeVAO == 0)
-    {
-        float planeVertices[] = {
-             25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
-            -25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f,
-            -25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
-
-             25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
-            -25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
-             25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,  25.0f, 25.0f
+            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y,
+            tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
+            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y,
+            tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
+            pos4.x, pos4.y, pos4.z, nm.x, nm.y, nm.z, uv4.x, uv4.y,
+            tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z
         };
-        glGenVertexArrays(1, &g_planeVAO);
-        glGenBuffers(1, &g_planeVBO);
-        glBindVertexArray(g_planeVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, g_planeVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+
+        glGenVertexArrays(1, &g_quadVAO);
+        glGenBuffers(1, &g_quadVBO);
+        glBindVertexArray(g_quadVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, g_quadVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(6 * sizeof(float)));
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(8 * sizeof(float)));
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(11 * sizeof(float)));
     }
-    glBindVertexArray(g_planeVAO);
+    glBindVertexArray(g_quadVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
 }
 
 void renderCube()
@@ -355,32 +308,6 @@ void renderCube()
     glDrawArrays(GL_TRIANGLES, 0, 36);
 }
 
-void renderQuad()
-{
-    if (g_quadVAO == 0)
-    {
-        float quadVertices[] = {
-            -1.0f,  1.0f,  0.0f, 1.0f,
-            -1.0f, -1.0f,  0.0f, 0.0f,
-             1.0f, -1.0f,  1.0f, 0.0f,
-            -1.0f,  1.0f,  0.0f, 1.0f,
-             1.0f, -1.0f,  1.0f, 0.0f,
-             1.0f,  1.0f,  1.0f, 1.0f
-        };
-        glGenVertexArrays(1, &g_quadVAO);
-        glGenBuffers(1, &g_quadVBO);
-        glBindVertexArray(g_quadVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, g_quadVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-    }
-    glBindVertexArray(g_quadVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-}
-
 unsigned int loadTexture(const char* path)
 {
     unsigned int textureID = 0;
@@ -397,6 +324,7 @@ unsigned int loadTexture(const char* path)
         else if (nrComponents == 4)
             format = GL_RGBA;
 
+        // 法线图是向量数据，不要标 GL_SRGB；漫反射本 Demo 也不做伽马，与教程一致
         glBindTexture(GL_TEXTURE_2D, textureID);
         glTexImage2D(GL_TEXTURE_2D, 0, static_cast<int>(format), width, height, 0,
                      format, GL_UNSIGNED_BYTE, data);
@@ -429,23 +357,18 @@ void processInput(GLFWwindow* window)
 
     if (edge(window, GLFW_KEY_1, g_key1WasDown))
     {
-        g_mode = 1;
-        std::cout << "[shadow] off\n";
+        g_mode = 0;
+        std::cout << "[normal mapping] geometry normal (flat)\n";
     }
     if (edge(window, GLFW_KEY_2, g_key2WasDown))
     {
-        g_mode = 2;
-        std::cout << "[shadow] hard + bias\n";
+        g_mode = 1;
+        std::cout << "[normal mapping] tangent-space map\n";
     }
     if (edge(window, GLFW_KEY_3, g_key3WasDown))
     {
-        g_mode = 3;
-        std::cout << "[shadow] 3x3 PCF\n";
-    }
-    if (edge(window, GLFW_KEY_4, g_key4WasDown))
-    {
-        g_mode = 4;
-        std::cout << "[shadow] depth map debug\n";
+        g_mode = 2;
+        std::cout << "[normal mapping] visualize normals\n";
     }
 
     if (g_camera == nullptr)
