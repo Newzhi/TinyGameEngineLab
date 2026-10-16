@@ -59,7 +59,7 @@ else()
     target_link_libraries(main PRIVATE glad glfw3 assimp z OpenGL::GL)
 endif()
 
-# 着色器每次构建后同步到运行目录，改 .vs/.fs 只需 Build，不必 Reload CMake
+# 着色器按 Part/Day 分子目录；每次构建后整树同步到运行目录，改 .vs/.fs 只需 Build
 add_custom_command(TARGET main POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders

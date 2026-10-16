@@ -398,4 +398,4 @@ Day11 抗锯齿
 1. LearnOpenGL CN — [几何着色器](https://learnopengl-cn.github.io/04%20Advanced%20OpenGL/09%20Geometry%20Shader/)
 2. LearnOpenGL EN — [Geometry Shader](https://learnopengl.com/Advanced-OpenGL/Geometry-Shader)
 3. 《Part4 Day08 — 高级 GLSL》— 接口块；几何着色器的输入是这块的数组
-4. 本工程 `src/cppfile/main.cpp` — 立方体面分离 + 法线外显；`shaders/gsExplode.gs`、`shaders/gsNormal.gs`
+4. 本工程 `src/cppfile/main.cpp` — 立方体面分离 + 法线外显；`shaders/Part4-HighLevelOpenGL/Day09-GeometryShader/gsExplode.gs`、`shaders/Part4-HighLevelOpenGL/Day09-GeometryShader/gsNormal.gs`

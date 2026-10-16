@@ -256,7 +256,7 @@ void main()
 }
 ```
 
-线性化后再映射成灰度（near/far 要和投影一致）。本工程正式用法在 `shaders/depthTest.fs`：
+线性化后再映射成灰度（near/far 要和投影一致）。本工程正式用法在 `shaders/Part4-HighLevelOpenGL/Day01-DepthTesting/depthTest.fs`：
 
 ```glsl
 float LinearizeDepth(float depth)
@@ -405,7 +405,7 @@ Pre-Z 不是硬件开关，而是多画一遍的**成本换收益**：
 | `main.cpp` 初始化 | `glEnable(GL_DEPTH_TEST)` |
 | `main.cpp` 主循环 | `glClear(GL_COLOR_BUFFER_BIT \| GL_DEPTH_BUFFER_BIT)` |
 | `main.cpp` 投影 | `CAMERA_NEAR_PLANE` / `CAMERA_FAR_PLANE` 与 `glm::perspective` 一致 |
-| `shaders/depthTest.vs` / `.fs` | 线性化 `gl_FragCoord.z` 并灰度显示（近黑远白） |
+| `shaders/Part4-HighLevelOpenGL/Day01-DepthTesting/depthTest.vs` / `.fs` | 线性化 `gl_FragCoord.z` 并灰度显示（近黑远白） |
 | `DEPTH_VISUALIZATION_ENABLED` | 当前固定走深度可视化；正常光照分支仍保留对照 |
 
 ---

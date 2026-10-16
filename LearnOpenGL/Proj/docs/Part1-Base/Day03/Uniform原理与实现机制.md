@@ -253,7 +253,7 @@ glUniform1i(loc, value);                          // 写入当前 Program
 
 CPU 只能给「shader 里已经声明、且链接后仍 active」的名字赋值。接收端：
 
-```8:33:LearnOpenGL/Proj/shaders/lightTest.fs
+```8:33:LearnOpenGL/Proj/shaders/Part2-Lighting/lightTest.fs
 struct Material {
     sampler2D diffuse;
     sampler2D specular;
@@ -289,7 +289,7 @@ uniform int lightType; // 0 平行光 | 1 点光 | 2 聚光
 
 FS 里使用示例（读的就是刚写入的槽）：
 
-```37:41:LearnOpenGL/Proj/shaders/lightTest.fs
+```37:41:LearnOpenGL/Proj/shaders/Part2-Lighting/lightTest.fs
     vec3 N = normalize(Normal);
     vec3 V = normalize(viewPos - FragPos);
 
@@ -467,5 +467,5 @@ Part2 材质 / 光照 / 投光物    ← struct uniform、lightType 等大量应
 1. LearnOpenGL CN — [着色器](https://learnopengl-cn.github.io/01%20Getting%20started/05%20Shaders/)（Uniform 小节）
 2. LearnOpenGL CN — [着色器类](https://learnopengl-cn.github.io/01%20Getting%20started/05%20Shaders/#shader)（`setXxx` 封装思路）
 3. OpenGL Wiki — [Uniform (GLSL)](https://www.khronos.org/opengl/wiki/Uniform_(GLSL))
-4. 本仓库 `src/headfile/Shader.h`、`src/cppfile/main.cpp`、`shaders/lightTest.fs` — 本节原码
+4. 本仓库 `src/headfile/Shader.h`、`src/cppfile/main.cpp`、`shaders/Part2-Lighting/lightTest.fs` — 本节原码
 5. 《EBO索引绘制与Uniform颜色》《变换矩阵与Uniform传递》— 用法实例

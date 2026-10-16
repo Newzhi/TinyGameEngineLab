@@ -338,7 +338,7 @@ glBufferSubData(GL_UNIFORM_BUFFER, 144, 4, &b);
 
 ### 6.2 初始化（对照 `main.cpp`）
 
-1. 四次 `Shader(...)`，顶点着色器都是 `shaders/ubo.vs`，片元着色器各一份纯色。四套程序才能看出 UBO 是跨程序共享的；如果四个立方体共用一个程序，`view` 本来就只设一次，看不出差别。
+1. 四次 `Shader(...)`，顶点着色器都是 `shaders/Part4-HighLevelOpenGL/Day08-AdvancedGLSL/ubo.vs`，片元着色器各一份纯色。四套程序才能看出 UBO 是跨程序共享的；如果四个立方体共用一个程序，`view` 本来就只设一次，看不出差别。
 2. `bindMatricesBlock` 对每个程序做 `glGetUniformBlockIndex(shader.ID, "Matrices")`，再 `glUniformBlockBinding(..., 0)`。块名必须和 `ubo.vs` 里的 `uniform Matrices` 一致，找不到会打印 `Matrices uniform block not found`。
 3. `glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW)` 预留 128 字节，`glBindBufferRange(..., 0, uboMatrices, 0, 128)` 把整段挂到绑定点 0。
 4. 立方体 VBO 用 `GL_STATIC_DRAW` 上传一次。顶点缓冲和 Uniform 缓冲是两块内存：一个给 `aPos`，一个给 `projection` / `view`。
@@ -353,7 +353,7 @@ glBufferSubData(GL_UNIFORM_BUFFER, 144, 4, &b);
 
 走动、滚轮缩放时四个立方体一起变，因为它们读的是同一段 UBO。改其中一个立方体的 `model` 不会带动另外三个。
 
-相关文件：`src/cppfile/main.cpp`，`shaders/ubo.vs`，`shaders/uboRed.fs` / `uboGreen.fs` / `uboBlue.fs` / `uboYellow.fs`。
+相关文件：`src/cppfile/main.cpp`，`shaders/Part4-HighLevelOpenGL/Day08-AdvancedGLSL/ubo.vs`，`shaders/Part4-HighLevelOpenGL/Day08-AdvancedGLSL/uboRed.fs` / `uboGreen.fs` / `uboBlue.fs` / `uboYellow.fs`。
 
 ---
 
@@ -411,4 +411,4 @@ Day09 几何着色器
 3. 《Part4 Day01 — 深度测试》— `gl_FragCoord.z`、Early-Z
 4. 《Part4 Day04 — 面剔除》— 环绕顺序与 `gl_FrontFacing`
 5. 《Part4 Day07 — 高级数据》— `glBufferData(NULL)` 与 `glBufferSubData`
-6. 本工程 `src/cppfile/main.cpp`、`shaders/ubo.vs` — 四套程序共用一块 `Matrices` UBO；`model` 仍走 `Shader::setMat4`
+6. 本工程 `src/cppfile/main.cpp`、`shaders/Part4-HighLevelOpenGL/Day08-AdvancedGLSL/ubo.vs` — 四套程序共用一块 `Matrices` UBO；`model` 仍走 `Shader::setMat4`

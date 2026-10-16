@@ -431,7 +431,7 @@ Proj/
     ├── glfwSetCursorPosCallback / glfwSetScrollCallback
     ├── mouse_callback / scroll_callback / processInput
     └── 渲染循环：lookAt + perspective(fov)
-  shaders/3.3.shader.vs          ← uniform mat4 view（未改）
+  shaders/Part1-Base/3.3.shader.vs          ← uniform mat4 view（未改）
   docs/Part1-Base/Day07/
     摄像机系统概述与原理.md
     鼠标回调与FPS摄像机代码实践.md   ← 本文

@@ -164,8 +164,8 @@ CMake POST_BUILD 会同步整个 `Resource/`。
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | 圆环矩阵、实例 VBO、按键切换 |
-| `shaders/asteroid.vs` / `.fs` | 实例矩阵当 model |
-| `shaders/planet.vs` / `.fs` | 行星；模式 2 的石头也用它 |
+| `shaders/Part4-HighLevelOpenGL/Day10-Instancing/asteroid.vs` / `.fs` | 实例矩阵当 model |
+| `shaders/Part4-HighLevelOpenGL/Day10-Instancing/planet.vs` / `.fs` | 行星；模式 2 的石头也用它 |
 | `Mesh.h` | `DrawInstanced`、`GetVAO` |
 | `Model.h` | `DrawInstanced` 转给每个 mesh |
 

@@ -208,7 +208,7 @@ glCopyBufferSubData(GL_ARRAY_BUFFER, GL_COPY_WRITE_BUFFER,
 | 右，蓝 | `glMapBufferRange` 写入 `srcVBO`，`glCopyBufferSubData` 拷到 `dstVBO`，VAO 绑的是拷贝结果 |
 | 下，橙条 | 每帧对顶点 2、3、4 的 Y 各做一次 `glBufferSubData`（偏移 `(i * 6 + 1) * sizeof(float)`）。底边和颜色不被重写，所以只有顶边在动 |
 
-相关文件：`src/cppfile/main.cpp`，`shaders/advancedData.vs` / `advancedData.fs`。
+相关文件：`src/cppfile/main.cpp`，`shaders/Part4-HighLevelOpenGL/Day07-AdvancedData/advancedData.vs` / `advancedData.fs`。
 
 `Mesh.h` 的 `setupMesh` 仍是模型路径：整块 `Vertex` 交错上传，步长 `sizeof(Vertex)`，偏移用 `offsetof`。
 

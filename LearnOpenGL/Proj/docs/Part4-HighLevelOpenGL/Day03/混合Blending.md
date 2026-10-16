@@ -245,9 +245,9 @@ FS 算出颜色（可含 alpha；可 discard）
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | 混合 Demo 主流程 |
-| `shaders/blending.vs` | 四边形 / 箱子顶点 |
-| `shaders/blending.fs` | 直接输出纹理（含 alpha） |
-| `shaders/blendingDiscard.fs` | alpha 阈值丢弃 |
+| `shaders/Part4-HighLevelOpenGL/Day03-Blending/blending.vs` | 四边形 / 箱子顶点 |
+| `shaders/Part4-HighLevelOpenGL/Day03-Blending/blending.fs` | 直接输出纹理（含 alpha） |
+| `shaders/Part4-HighLevelOpenGL/Day03-Blending/blendingDiscard.fs` | alpha 阈值丢弃 |
 | `Resource/Texture/grass.png` | 草 |
 | `Resource/Texture/blending_transparent_window.png` | 半透明窗 |
 

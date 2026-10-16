@@ -273,7 +273,7 @@ unsigned int cubemapTexture = loadCubemap(faces);
 **第 4 步：编译天空盒着色器，告诉采样器用哪个纹理单元。**
 
 ```cpp
-Shader skyboxShader("shaders/skybox.vs", "shaders/skybox.fs");
+Shader skyboxShader("shaders/Part4-HighLevelOpenGL/Day06-Cubemaps/skybox.vs", "shaders/Part4-HighLevelOpenGL/Day06-Cubemaps/skybox.fs");
 skyboxShader.use();
 skyboxShader.setInt("skybox", 0);   // samplerCube skybox ← GL_TEXTURE0
 ```
@@ -482,8 +482,8 @@ CMake POST_BUILD 会同步整个 `Resource/`。官方资源：[LearnOpenGL skybo
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | 加载 cubemap、双物体 + 天空盒 |
-| `shaders/skybox.vs` / `skybox.fs` | 天空盒（位置当方向，`xyww`） |
-| `shaders/cubemapObject.vs` / `cubemapObject.fs` | 箱子/地板；反射与折射 |
+| `shaders/Part4-HighLevelOpenGL/Day06-Cubemaps/skybox.vs` / `skybox.fs` | 天空盒（位置当方向，`xyww`） |
+| `shaders/Part4-HighLevelOpenGL/Day06-Cubemaps/cubemapObject.vs` / `cubemapObject.fs` | 箱子/地板；反射与折射 |
 | `Resource/Texture/skybox/` | 六面 jpg |
 
 ### 6.3 排错 checklist

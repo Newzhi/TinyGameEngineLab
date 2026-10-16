@@ -150,7 +150,7 @@ Demo 只有一个立方体，每个面从外侧看都是 CCW，并在六个面�
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | 单立方体 + 三种剔除模式 |
-| `shaders/faceCull.vs` / `faceCull.fs` | 位置 + UV，采样箱子纹理 |
+| `shaders/Part4-HighLevelOpenGL/Day04-FaceCulling/faceCull.vs` / `faceCull.fs` | 位置 + UV，采样箱子纹理 |
 | `Resource/Texture/container2.png` | 六个面共用的观察纹理 |
 
 ### 5.2 建议观察顺序

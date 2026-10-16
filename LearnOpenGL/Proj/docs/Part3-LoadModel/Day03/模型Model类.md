@@ -14,7 +14,7 @@
 |------|------|
 | `src/headfile/Model.h` | Model + `TextureFromFile` |
 | `src/headfile/Mesh.h` | Vertex / Texture / Mesh |
-| `shaders/model.vs` / `model.fs` | 采样 `material.texture_diffuse1` 等 |
+| `shaders/Part3-LoadModel/model.vs` / `model.fs` | 采样 `material.texture_diffuse1` 等 |
 | `Resource/TestLoadModel/` | 背包 `.obj` + 贴图 |
 | `main.cpp` | 构造 `Model` 并每帧 `Draw` |
 
@@ -259,7 +259,7 @@ Resource/TestLoadModel/
 ### 8.2 `main` 用法摘要
 
 ```cpp
-Shader modelShader("shaders/model.vs", "shaders/model.fs");
+Shader modelShader("shaders/Part3-LoadModel/model.vs", "shaders/Part3-LoadModel/model.fs");
 Model backpackModel("Resource/TestLoadModel/backpack.obj");
 
 // 循环里：
@@ -340,5 +340,5 @@ LearnOpenGL 官网 Part3 到 Model 基本结束；后面章节是高级光照与
 
 1. LearnOpenGL CN — [模型](https://learnopengl-cn.github.io/03%20Model%20Loading/03%20Model/)  
 2. LearnOpenGL EN — [Model](https://learnopengl.com/Model-Loading/Model)  
-3. 本工程 `Model.h`、`Mesh.h`、`shaders/model.*`、`Resource/TestLoadModel/`  
+3. 本工程 `Model.h`、`Mesh.h`、`shaders/Part3-LoadModel/model.*`、`Resource/TestLoadModel/`  
 4. 《Part3 Day01 / Day02》— Assimp 与 Mesh 基础  

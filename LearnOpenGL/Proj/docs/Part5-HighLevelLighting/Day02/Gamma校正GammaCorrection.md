@@ -7,6 +7,7 @@
 | [Day01 高级光照](../Day01/高级光照AdvancedLighting.md) | Blinn-Phong、半程向量 |
 | [Part2 Day05 投光物](../../Part2-Lighting/Day05/投光物LightCasters.md) | 点光衰减 `1/(Kc+Kl·d+Kq·d²)` |
 | **本文档** | 显示器 Gamma、输出校正、sRGB 贴图、衰减公式为何「看起来不对」 |
+| [Day03 阴影映射](../Day03/阴影映射ShadowMapping.md) | 深度贴图、偏移、PCF |
 
 **工程对照**：当前 `main.cpp` 仍是地板 + 点光，改成一排四盏灯，方便看衰减半径。`空格` 或 `2` 打开 Gamma（sRGB 贴图 + `1/d²` + 输出 `pow(1/2.2)`）；`1` 关掉（普通 RGB 贴图 + `1/d`，和 Part2 观感接近）。
 
@@ -124,7 +125,7 @@ Part2 那套 `Kc/Kl/Kq` 在校正后仍然能用，只是参数要重调，因�
 | `2` 或 `空格` | 有校正：`GL_SRGB` 贴图 + `1/d²` + `pow(rgb, 1/2.2)` |
 | WASD、鼠标、滚轮、Esc | 与前面几章相同 |
 
-### 5.2 着色器（对照 `shaders/gamma.*`）
+### 5.2 着色器（对照 `shaders/Part5-HighLevelLighting/Day02-GammaCorrection/gamma.*`）
 
 顶点着色器与 Day01 地板相同（世界坐标、法线、UV）。
 
@@ -134,7 +135,7 @@ Part2 那套 `Kc/Kl/Kq` 在校正后仍然能用，只是参数要重调，因�
 
 按开关选 `floorLinear` 或 `floorSRGB`，上传 `lightPositions[4]`、`lightColors[4]`、`gamma`。
 
-相关文件：`src/cppfile/main.cpp`，`shaders/gamma.vs` / `gamma.fs`。
+相关文件：`src/cppfile/main.cpp`，`shaders/Part5-HighLevelLighting/Day02-GammaCorrection/gamma.vs` / `gamma.fs`。
 
 ---
 
@@ -168,7 +169,7 @@ Part5 Day01 Blinn-Phong
   ↓
 Part5 Day02 Gamma 校正（本文）← 线性空间里算光，上屏前再编码
   ↓
-阴影映射 …
+Part5 Day03 阴影映射
 ```
 
 ---

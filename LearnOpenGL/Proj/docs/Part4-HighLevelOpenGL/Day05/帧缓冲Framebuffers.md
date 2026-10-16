@@ -440,8 +440,8 @@ Pass3：（可选）再对最终颜色做本章这种后处理
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | FBO 创建与双 Pass 流程 |
-| `shaders/framebuffer.vs` / `framebuffer.fs` | 普通场景着色 |
-| `shaders/framebufferScreen.vs` / `framebufferScreen.fs` | 全屏后处理 |
+| `shaders/Part4-HighLevelOpenGL/Day05-Framebuffers/framebuffer.vs` / `framebuffer.fs` | 普通场景着色 |
+| `shaders/Part4-HighLevelOpenGL/Day05-Framebuffers/framebufferScreen.vs` / `framebufferScreen.fs` | 全屏后处理 |
 | `Resource/Texture/container.jpg` / `container2.png` | 地板 / 箱子 |
 
 ### 8.2 排错 checklist

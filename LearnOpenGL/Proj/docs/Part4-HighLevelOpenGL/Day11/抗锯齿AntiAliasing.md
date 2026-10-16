@@ -150,7 +150,7 @@ vec4 colorSample = texelFetch(screenTextureMS, ivec2(gl_FragCoord.xy), 3);
 - 模式 2：绑 `g_msaaFBO` 画立方体，再 `READ=msaa / DRAW=0` 做 `glBlitFramebuffer`。
 - 模式 3：同样画进 MSAA，blit 到 `g_resolveFBO`，关掉深度，四边形采样 `g_resolveColor`，`uGray = 1`。
 
-相关文件：`src/cppfile/main.cpp`，`shaders/msaa.vs` / `msaa.fs`，`shaders/msaaScreen.vs` / `msaaScreen.fs`。
+相关文件：`src/cppfile/main.cpp`，`shaders/Part4-HighLevelOpenGL/Day11-AntiAliasing/msaa.vs` / `msaa.fs`，`shaders/Part4-HighLevelOpenGL/Day11-AntiAliasing/msaaScreen.vs` / `msaaScreen.fs`。
 
 ---
 

@@ -436,8 +436,8 @@ glEnable(GL_DEPTH_TEST);
 | 文件 | 作用 |
 |------|------|
 | `src/cppfile/main.cpp` | 镜子四步流程 |
-| `shaders/outline.vs` / `outline.fs` | 地板 / 镜面 / 镜框纯色（`uAlpha` 支持玻璃） |
-| `shaders/model.vs` / `model.fs` | 背包正常着色 |
+| `shaders/Part4-HighLevelOpenGL/Day02-StencilTesting/outline.vs` / `outline.fs` | 地板 / 镜面 / 镜框纯色（`uAlpha` 支持玻璃） |
+| `shaders/Part3-LoadModel/model.vs` / `model.fs` | 背包正常着色 |
 
 运行：`WASD` + 鼠标；墙上一面镜子里应能看到背包与地板的左右翻转倒影。物体都放在镜前，避免镜后几何被错误反射（完整版需 `gl_ClipDistance` 裁剪平面）。
 

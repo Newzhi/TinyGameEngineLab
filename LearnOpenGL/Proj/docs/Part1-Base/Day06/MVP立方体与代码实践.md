@@ -63,8 +63,8 @@ gl_Position = projection * view * model * vec4(aPos, 1.0f);
 Proj/
   src/cppfile/main.cpp          ← 立方体顶点、MVP 矩阵、深度测试
   src/headfile/Shader.h         ← 新增 setMat4
-  shaders/3.3.shader.vs           ← transform → model/view/projection
-  shaders/3.3.shader.fs           ← 未改（仍采样纹理 × 顶点色）
+  shaders/Part1-Base/3.3.shader.vs           ← transform → model/view/projection
+  shaders/Part1-Base/3.3.shader.fs           ← 未改（仍采样纹理 × 顶点色）
   Resource/Texture/container.jpg  ← 六个面共用同一张纹理
   docs/Part1/Day06/
     坐标系统与空间变换链.md

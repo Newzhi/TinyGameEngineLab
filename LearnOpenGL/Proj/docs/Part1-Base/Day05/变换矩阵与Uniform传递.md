@@ -77,7 +77,7 @@ gl_Position = transform * vec4(aPos, 1.0f);
 
 ### 4.1 Shader 里：声明
 
-**顶点 shader** `shaders/3.3.shader.vs`：
+**顶点 shader** `shaders/Part1-Base/3.3.shader.vs`：
 
 ```glsl
 uniform mat4 transform;
@@ -335,8 +335,8 @@ Day 06 文档与代码已完成 MVP 立方体，详见：
 Proj/
   src/cppfile/main.cpp          ← Day05: transform；Day06: MVP 立方体
   src/headfile/Shader.h         ← setMat4（Day06 新增）
-  shaders/3.3.shader.vs         ← Day06: model/view/projection
-  shaders/3.3.shader.fs         ← uniform sampler2D ourTexture
+  shaders/Part1-Base/3.3.shader.vs         ← Day06: model/view/projection
+  shaders/Part1-Base/3.3.shader.fs         ← uniform sampler2D ourTexture
   includes/glm/                 ← GLM 1.0.3
   docs/Part1/Day05/                   ← 本文档所在目录
   docs/Part1/Day06/MVP立方体与代码实践.md  ← Day06 代码说明

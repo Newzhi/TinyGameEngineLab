@@ -38,8 +38,10 @@ Proj/
     GLFW/glfw3.h
     KHR/khrplatform.h
   shaders/
-    3.3.shader.vs           ← 顶点着色器 GLSL 源文件
-    3.3.shader.fs           ← 片段着色器 GLSL 源文件
+    Part1-Base/
+      3.3.shader.vs         ← 顶点着色器 GLSL 源文件
+      3.3.shader.fs         ← 片段着色器 GLSL 源文件
+    # 后续按功能分子目录，如 Part5-HighLevelLighting/Day03-ShadowMapping/
   docs/
     Day03/
       EBO索引绘制与Uniform颜色.md
@@ -55,7 +57,7 @@ Proj/
 | `src/headfile/` | 项目自己写的 `.h` 头文件 | 只被 `#include`，不直接参与编译 |
 | `src/` 根目录 | `glad.c`（第三方 C 源文件） | 暂时单独放，后续可移到 `third_party/` |
 | `includes/` | 外部库头文件（GLAD、GLFW、KHR） | 第三方只读，不修改 |
-| `shaders/` | GLSL 着色器文件 | 运行时读取，不参与 C++ 编译 |
+| `shaders/` | GLSL 着色器文件 | 按 Part / Day 分子目录；运行时读取，不参与 C++ 编译 |
 
 ---
 
@@ -82,7 +84,7 @@ const char* vertexShaderSource =
 
 **Day 03 的做法：** 把 GLSL 单独存成文件，运行时由 `Shader` 类读进来。
 
-`shaders/3.3.shader.vs`：
+`shaders/Part1-Base/3.3.shader.vs`：
 
 ```glsl
 #version 330 core
@@ -98,7 +100,7 @@ void main()
 }
 ```
 
-`shaders/3.3.shader.fs`：
+`shaders/Part1-Base/3.3.shader.fs`：
 
 ```glsl
 #version 330 core
@@ -268,7 +270,7 @@ void checkCompileErrors(unsigned int shader, const std::string& type) const
 if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { ... }
 
 // 然后才能创建 Shader（内部会调用 glCreateShader 等 OpenGL API）
-Shader ourShader("shaders/3.3.shader.vs", "shaders/3.3.shader.fs");
+Shader ourShader("shaders/Part1-Base/3.3.shader.vs", "shaders/Part1-Base/3.3.shader.fs");
 ```
 
 `Shader` 构造函数内部调用 `glCreateShader`、`glCompileShader` 等 OpenGL 函数。这些函数指针由 GLAD 在 `gladLoadGLLoader` 时填入——如果在这之前创建 `Shader`，函数指针是空的，会直接崩溃。
@@ -276,7 +278,7 @@ Shader ourShader("shaders/3.3.shader.vs", "shaders/3.3.shader.fs");
 ### 4.3 shader 文件路径是运行时路径，不是源码路径
 
 ```cpp
-Shader ourShader("shaders/3.3.shader.vs", "shaders/3.3.shader.fs");
+Shader ourShader("shaders/Part1-Base/3.3.shader.vs", "shaders/Part1-Base/3.3.shader.fs");
 ```
 
 这里的 `"shaders/..."` 是**相对于程序运行时工作目录**的路径，不是相对于 `main.cpp` 所在目录。CMakeLists.txt 里有：

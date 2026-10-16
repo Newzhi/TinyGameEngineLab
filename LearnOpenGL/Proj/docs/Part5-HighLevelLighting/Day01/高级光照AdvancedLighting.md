@@ -110,7 +110,7 @@ vec3 specular = lightColor * spec;
 | `[` / `]` | 反光度 ÷2 / ×2（1～256） |
 | WASD、鼠标、滚轮、Esc | 与前面几章相同 |
 
-### 4.2 着色器（对照 `shaders/blinnPhong.*`）
+### 4.2 着色器（对照 `shaders/Part5-HighLevelLighting/Day01-AdvancedLighting/blinnPhong.*`）
 
 顶点着色器输出世界空间位置、法线、UV（接口块 `VS_OUT`，接 Part4 Day08）。
 
@@ -132,7 +132,7 @@ FragColor = ambient + diffuse + specular
 
 设 `viewPos`、`lightPos`、`blinn`、`shininess`，画地板；再画缩放后的灯立方体。
 
-相关文件：`src/cppfile/main.cpp`，`shaders/blinnPhong.vs` / `blinnPhong.fs`，`shaders/lamp.vs` / `lamp.fs`。
+相关文件：`src/cppfile/main.cpp`，`shaders/Part5-HighLevelLighting/Day01-AdvancedLighting/blinnPhong.vs` / `blinnPhong.fs`，`shaders/common/lamp.vs` / `lamp.fs`。
 
 ---
 
